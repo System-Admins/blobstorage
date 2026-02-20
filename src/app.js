@@ -3832,3 +3832,99 @@ function _showSasModal(item, isFolder) {
     _showEmailComposeModal(itemName, resultEl.value);
   };
 }
+
+// ── Theme toggle (dark / light mode) ─────────────────────────
+
+const _THEME_STORAGE_KEY = "be_theme";
+
+function _initTheme() {
+  const saved = localStorage.getItem(_THEME_STORAGE_KEY);
+  if (saved === "dark" || saved === "light") {
+    document.documentElement.setAttribute("data-theme", saved);
+  } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+    document.documentElement.setAttribute("data-theme", "dark");
+  }
+  _updateThemeIcons();
+  // Listen for OS-level theme changes when user has no explicit preference
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
+    if (localStorage.getItem(_THEME_STORAGE_KEY)) return; // user chose manually
+    document.documentElement.setAttribute("data-theme", e.matches ? "dark" : "light");
+    _updateThemeIcons();
+  });
+}
+
+function _toggleTheme() {
+  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  const next = isDark ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  localStorage.setItem(_THEME_STORAGE_KEY, next);
+  _updateThemeIcons();
+}
+
+function _updateThemeIcons() {
+  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  // Icon shows the action: ☀️ = "switch to light", 🌙 = "switch to dark"
+  const icon = isDark ? "\u2600\ufe0f" : "\uD83C\uDF19";
+  document.querySelectorAll(".theme-toggle").forEach((btn) => { btn.textContent = icon; });
+}
+
+// Apply theme immediately (before DOMContentLoaded so no flash-of-wrong-theme)
+_initTheme();
+
+// Wire all theme toggle buttons once the DOM is ready
+document.addEventListener("DOMContentLoaded", () => {
+  document.querySelectorAll(".theme-toggle").forEach((btn) => {
+    btn.addEventListener("click", _toggleTheme);
+  });
+});
+
+// ── Keyboard shortcuts ───────────────────────────────────────
+
+document.addEventListener("keydown", (e) => {
+  // Skip when user is typing in an input, textarea, or contenteditable
+  const tag = (e.target.tagName || "").toLowerCase();
+  const isEditing = tag === "input" || tag === "textarea" || e.target.isContentEditable;
+
+  // Ctrl/Cmd + K — toggle search bar
+  if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+    e.preventDefault();
+    if (!_el("mainApp")?.classList.contains("hidden")) _toggleSearchBar();
+    return;
+  }
+
+  // Ctrl/Cmd + U — toggle upload panel
+  if ((e.ctrlKey || e.metaKey) && e.key === "u") {
+    e.preventDefault();
+    if (!_el("mainApp")?.classList.contains("hidden") && _canUpload) {
+      _el("uploadBtn")?.click();
+    }
+    return;
+  }
+
+  // F5 — refresh (prevent default browser reload and refresh the listing instead)
+  if (e.key === "F5" && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+    if (!_el("mainApp")?.classList.contains("hidden")) {
+      e.preventDefault();
+      _loadFiles(_currentPrefix);
+      return;
+    }
+  }
+
+  // Skip remaining shortcuts when user is editing text
+  if (isEditing) return;
+
+  // Backspace — navigate to parent folder
+  if (e.key === "Backspace") {
+    if (!_el("mainApp")?.classList.contains("hidden") && _currentPrefix) {
+      e.preventDefault();
+      _goUp();
+    }
+    return;
+  }
+
+  // ? — show help modal
+  if (e.key === "?") {
+    _showHelpModal();
+    return;
+  }
+});

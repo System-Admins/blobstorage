@@ -26,6 +26,7 @@
 
   <!-- ── Sign-in page ─────────────────────────────────────── -->
   <div id="signInPage" class="sign-in-page hidden">
+    <button id="signInThemeToggleBtn" class="theme-toggle sign-in-theme-toggle" title="Toggle dark / light theme" aria-label="Toggle dark or light theme">🌙</button>
     <div class="sign-in-card">
       <div class="app-logo">☁️</div>
       <h1>Blob Browser</h1>
@@ -48,6 +49,7 @@
         <h1 class="header-title">Blob Browser</h1>
       </div>
       <div class="picker-header-right">
+        <button id="pickerThemeToggleBtn" class="theme-toggle" title="Toggle dark / light theme" aria-label="Toggle dark or light theme">🌙</button>
         <button id="pickerBackBtn" class="btn btn-secondary hidden" title="Return to current container">← Back to explorer</button>
         <button id="pickerSignOutBtn" class="btn btn-secondary" title="Sign out">🚪 <span class="btn-label">Sign out</span></button>
       </div>
@@ -99,6 +101,7 @@
         <span class="header-subtitle" id="storageInfo"></span>
       </div>
       <div class="header-right">
+        <button id="themeToggleBtn" class="theme-toggle" title="Toggle dark / light theme" aria-label="Toggle dark or light theme">🌙</button>
         <button id="changeStorageBtn" class="btn btn-secondary" title="Switch storage account or container">🗄️ <span class="btn-label">Change</span></button>
         <button id="helpBtn" class="btn btn-secondary" title="Help">❓ <span class="btn-label">Help</span></button>
         <button id="signOutBtn" class="btn btn-secondary" title="Sign out">🚪 <span class="btn-label">Sign out</span></button>
@@ -578,12 +581,33 @@
         </div>
 
         <div class="help-section">
-          <h3 class="help-heading">�🔑 Opening a SAS URL</h3>
+          <h3 class="help-heading">🔑 Opening a SAS URL</h3>
           <ul class="help-list">
             <li>Click <strong>🔑 Open SAS URL</strong> in the header (or on the sign-in page) and paste in a SAS URL provided by your administrator.</li>
             <li>The application will automatically detect what the SAS permits (list, read, write, delete) and adjust the available actions accordingly.</li>
             <li>Click <strong>Disconnect</strong> to leave SAS mode and return to your normal session.</li>
           </ul>
+        </div>
+
+        <div class="help-section">
+          <h3 class="help-heading">🌙 Dark mode</h3>
+          <ul class="help-list">
+            <li>Click the <strong>🌙 / ☀️</strong> button in the header to toggle between dark and light themes.</li>
+            <li>By default, Blob Browser follows your operating system's appearance setting.</li>
+            <li>Your preference is remembered across sessions.</li>
+          </ul>
+        </div>
+
+        <div class="help-section">
+          <h3 class="help-heading">⌨️ Keyboard shortcuts</h3>
+          <table class="shortcut-table">
+            <tr><td><kbd>Ctrl</kbd> + <kbd>K</kbd></td><td>Open / close search</td></tr>
+            <tr><td><kbd>Ctrl</kbd> + <kbd>U</kbd></td><td>Toggle upload panel</td></tr>
+            <tr><td><kbd>Backspace</kbd></td><td>Navigate to parent folder</td></tr>
+            <tr><td><kbd>F5</kbd></td><td>Refresh file listing</td></tr>
+            <tr><td><kbd>?</kbd></td><td>Open this help dialog</td></tr>
+            <tr><td><kbd>Escape</kbd></td><td>Close any open dialog</td></tr>
+          </table>
         </div>
 
       </div>
