@@ -87,7 +87,7 @@ async function getArmToken() {
   if (cached && Date.now() < expiry) return cached;
 
   // Fetch a new token using the stored refresh token
-  const rt = localStorage.getItem("be_refresh_token");
+  const rt = localStorage.getItem(_KEYS.REFRESH_TOKEN);
   if (!rt) throw new Error("No refresh token — please sign in again.");
 
   const res = await fetch(
