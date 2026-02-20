@@ -318,7 +318,7 @@ The **🔑 SAS** button (available on both files and folders when `allowSas: tru
 |---|---|
 | **Start time** | Optional. When the SAS becomes valid. Leave blank to start immediately. |
 | **Expiry time** | Required. When the SAS expires. Maximum 7 days from now (User Delegation Key limit). |
-| **Allowed IPs** | Optional. Restrict the SAS to a single IP (`1.2.3.4`) or a CIDR range (`1.2.3.0/24`). Leave blank to allow any IP. |
+| **Allowed IPs** | Optional. Restrict the SAS to a single IP (`1.2.3.4`) or an IP range (`1.2.3.4-1.2.3.9`). Leave blank to allow any IP. |
 | **Permissions** | Shown only when `sasShowPermissions: true`. For files: Read / Write / Delete. For folders: Read / List / Write / Delete. |
 
 ### SAS scope
