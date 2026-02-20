@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Cloud body -->
+  <path d="M25.5 14.1a6 6 0 0 0-11.6-2A4.5 4.5 0 0 0 7 16.5 4.5 4.5 0 0 0 11.5 21h13a4 4 0 0 0 1-7.9z"
+        fill="#0078d4"/>
+  <!-- Upward arrow -->
+  <polyline points="16,19 16,13" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round"/>
+  <polyline points="13.5,15.2 16,12.8 18.5,15.2"
+            fill="none" stroke="#ffffff" stroke-width="1.8"
+            stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

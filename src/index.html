@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+  <title>Blob Storage Explorer</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ── Loading overlay ──────────────────────────────────── -->
+  <div id="loadingOverlay" class="loading-overlay">
+    <div class="spinner"></div>
+  </div>
+
+  <!-- ── Sign-in page ─────────────────────────────────────── -->
+  <div id="signInPage" class="sign-in-page hidden">
+    <div class="sign-in-card">
+      <div class="app-logo">☁️</div>
+      <h1>Blob Storage Explorer</h1>
+      <p>Sign in with your Microsoft account to browse your storage container.</p>
+      <button id="signInBtn" class="btn btn-primary">
+        Sign in with Microsoft
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Storage picker ─────────────────────────────────────── -->
+  <div id="pickerPage" class="picker-page hidden">
+    <header class="picker-header">
+      <div class="picker-header-left">
+        <span class="header-logo">☁️</span>
+        <h1 class="header-title">Blob Storage Explorer</h1>
+      </div>
+      <div class="picker-header-right">
+        <div class="user-info" id="pickerUserInfo">
+          <span class="user-name" id="pickerUserName"></span>
+        </div>
+        <button id="pickerBackBtn" class="btn btn-secondary hidden" title="Return to current container">← Back to explorer</button>
+        <button id="pickerSignOutBtn" class="btn btn-secondary">Sign out</button>
+      </div>
+    </header>
+
+    <div class="picker-body">
+      <div class="picker-title-row">
+        <h2 class="picker-heading">Select a storage container</h2>
+        <input type="search" id="pickerSearch" class="picker-search" placeholder="🔍 Filter accounts &amp; containers…" />
+      </div>
+
+      <div id="pickerSubList" class="picker-sub-list">
+        <!-- Subscription groups injected by JS -->
+      </div>
+
+      <div id="pickerEmpty" class="picker-empty hidden">
+        <div class="empty-icon">🗄️</div>
+        <p>No storage accounts found.<br>Make sure you have a Storage data-plane role on at least one account.</p>
+      </div>
+
+      <div id="pickerError" class="picker-error hidden"></div>
+    </div>
+  </div>
+
+  <!-- ── Main application ─────────────────────────────────── -->
+  <div id="mainApp" class="main-app hidden">
+
+    <!-- Header -->
+    <header class="header">
+      <div class="header-left">
+        <span class="header-logo">☁️</span>
+        <h1 class="header-title">Blob Storage Explorer</h1>
+        <span class="header-subtitle" id="storageInfo"></span>
+      </div>
+      <div class="header-right">
+        <span id="permBadge" class="perm-badge hidden"></span>
+        <div class="user-info" id="userInfo">
+          <span class="user-name" id="userDisplayName"></span>
+        </div>
+        <button id="changeStorageBtn" class="btn btn-secondary" title="Switch storage account or container">🗄️ <span class="btn-label">Change</span></button>
+        <button id="signOutBtn" class="btn btn-secondary">Sign out</button>
+      </div>
+    </header>
+
+    <!-- App body: folder tree sidebar + content column -->
+    <div class="app-body">
+      <nav id="folderTree" class="folder-tree" aria-label="Folder navigation tree">
+        <div class="tree-header">
+          <span class="tree-header-label">Tree view</span>
+          <div class="tree-header-actions">
+            <button id="treeExpandAllBtn"   class="btn btn-icon btn-small" title="Expand all">&#8853;</button>
+            <button id="treeCollapseAllBtn" class="btn btn-icon btn-small" title="Collapse all">&#8854;</button>
+          </div>
+        </div>
+        <div id="treeRoot" class="tree-root"></div>
+      </nav>
+
+      <div class="app-content-col">
+        <!-- Breadcrumb navigation -->
+        <nav class="breadcrumb-nav" aria-label="Folder navigation">
+          <ol id="breadcrumb" class="breadcrumb"></ol>
+        </nav>
+
+        <!-- Toolbar -->
+        <div class="toolbar" role="toolbar" aria-label="View controls">
+          <div class="toolbar-left">
+            <button id="treeToggleBtn" class="btn btn-icon active" title="Toggle folder tree">&#9664; <span class="btn-label">Tree</span></button>
+            <button id="upBtn" class="btn btn-icon hidden" title="Go up one level" aria-label="Go up one level">&#8593; <span class="btn-label">Up</span></button>
+            <span id="itemCount" class="item-count"></span>
+          </div>
+          <div class="toolbar-right">
+            <button id="newBtn"         class="btn btn-upload hidden" title="Create new folder or file">&#xff0b; <span class="btn-label">New</span></button>
+            <button id="uploadBtn"      class="btn btn-upload hidden" title="Upload files or folders">⬆ <span class="btn-label">Upload</span></button>
+            <button id="downloadAllBtn" class="btn btn-upload"        title="Download current folder as ZIP">⬇ <span class="btn-label">Download</span></button>
+            <button id="infoBtn"        class="btn btn-icon"          title="Current location info">ℹ️ <span class="btn-label">Info</span></button>
+            <button id="searchBtn"  class="btn btn-icon"          title="Search files and folders">🔍 <span class="btn-label">Search</span></button>
+            <button id="reportBtn"  class="btn btn-icon"          title="Export CSV report">📊 <span class="btn-label">Report</span></button>
+            <button id="refreshBtn" class="btn btn-icon"          title="Refresh">↻ <span class="btn-label">Refresh</span></button>
+            <div class="view-toggle" role="group" aria-label="View mode">
+              <button id="listViewBtn" class="btn btn-icon active" title="List view" aria-pressed="true">☰ <span class="btn-label">List</span></button>
+              <button id="gridViewBtn" class="btn btn-icon"        title="Grid view" aria-pressed="false">⊞ <span class="btn-label">Grid</span></button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Search bar (shown/hidden via the 🔍 toolbar button) -->
+        <div class="search-bar hidden" id="searchBar">
+          <div class="search-input-group">
+            <input type="search" id="searchInput" class="search-input" placeholder="Search files and folders…" autocomplete="off" spellcheck="false" />
+            <button id="searchClearBtn" class="btn btn-icon btn-small search-clear hidden" title="Clear">✕</button>
+          </div>
+          <div class="search-scope-group">
+            <label class="search-scope-opt">
+              <input type="radio" name="searchScope" value="folder" checked />
+              <span>Current folder</span>
+            </label>
+            <label class="search-scope-opt">
+              <input type="radio" name="searchScope" value="container" />
+              <span>Whole container</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Upload panel (visible only to authorised uploaders) -->
+        <div id="uploadPanel" class="upload-panel hidden">
+          <div class="upload-dropzone" id="dropZone">
+            <div class="dropzone-icon">📤</div>
+            <p class="dropzone-text">Drag &amp; drop files here, or use the buttons below</p>
+            <p class="dropzone-subtext">Files will be placed in the currently open folder</p>
+            <div class="dropzone-actions">
+              <button id="pickFilesBtn"  class="btn btn-upload-action">📄 Select files</button>
+              <button id="pickFolderBtn" class="btn btn-upload-action">📁 Select folder</button>
+            </div>
+            <input type="file" id="fileInput"   multiple       hidden />
+            <input type="file" id="folderInput" webkitdirectory hidden />
+          </div>
+          <div id="uploadQueue" class="upload-queue hidden">
+            <div class="upload-queue-header">
+              <span id="uploadQueueCount" class="upload-queue-count"></span>
+              <button id="clearCompletedBtn" class="btn btn-icon btn-small">Clear completed</button>
+            </div>
+            <div id="uploadQueueList" class="upload-queue-list"></div>
+          </div>
+        </div>
+
+        <!-- Selection action bar (shown when items are selected) -->
+        <div id="selectionBar" class="selection-bar hidden" role="toolbar" aria-label="Selection actions">
+          <span id="selectionCount" class="selection-count"></span>
+          <div class="selection-actions">
+            <button id="selBulkDownloadBtn" class="btn btn-sel-action">&#x2B07; Download</button>
+            <button id="selBulkDeleteBtn"   class="btn btn-sel-action btn-sel-danger">&#x1F5D1;&#xFE0F; Delete</button>
+            <button id="selClearBtn"        class="btn btn-sel-clear">&#x2715; Clear selection</button>
+          </div>
+        </div>
+
+        <!-- File/folder content -->
+        <main id="contentArea" class="content" aria-live="polite">
+          <div id="errorMessage" class="error-banner hidden" role="alert"></div>
+          <div id="networkErrorHelp" class="network-error-help hidden" role="alert">
+            <strong>Connection failed — possible causes:</strong>
+            <ul class="network-error-list">
+              <li>
+                <strong>🔒 Network access is blocked</strong> — Ask your administrator to allow your public IP address under<br>
+                <em>Azure Portal → Storage Account → Networking → Firewalls and virtual networks</em>
+              </li>
+              <li>
+                <strong>🌐 CORS is not configured</strong> — Ask your administrator to add the following origin to the Blob service CORS rules under<br>
+                <em>Azure Portal → Storage Account → Resource sharing (CORS) → Blob service</em>:<br>
+                <code id="networkErrorOrigin"></code>
+              </li>
+            </ul>
+          </div>
+          <div id="searchBanner" class="search-banner hidden"></div>
+          <div id="fileContainer"></div>
+          <div id="emptyState" class="empty-state hidden">
+            <div class="empty-icon">📂</div>
+            <p>This folder is empty</p>
+          </div>
+        </main>
+      </div><!-- /.app-content-col -->
+    </div><!-- /.app-body -->
+    <footer class="app-footer">
+      <a href="https://www.systemadmins.com" target="_blank" rel="noopener noreferrer">&copy; <span id="footerYear"></span> System Admins ApS</a>
+    </footer>
+
+  </div><!-- /#mainApp -->
+  <!-- ── Properties modal ────────────────────────────── -->
+  <div id="propsModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="propsModalTitle">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title" id="propsModalTitle">Properties</h2>
+        <button class="modal-close" id="propsModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <table class="props-table" id="propsTable"></table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Rename modal ────────────────────────────────── -->
+  <div id="renameModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="renameModalTitle">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title" id="renameModalTitle">Rename</h2>
+        <button class="modal-close" id="renameModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <label class="rename-label" for="renameInput">New name</label>
+        <input type="text" id="renameInput" class="rename-input" spellcheck="false" />
+        <p class="rename-error hidden" id="renameError"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary-neutral" id="renameCancelBtn">Cancel</button>
+        <button class="btn btn-primary-sm"        id="renameConfirmBtn">Rename</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Delete confirmation modal ─────────────────────────── -->
+  <div id="deleteModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="deleteModalTitle">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title" id="deleteModalTitle">Confirm delete</h2>
+        <button class="modal-close" id="deleteModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <p id="deleteModalMsg" style="font-size:14px;line-height:1.6;"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary-neutral" id="deleteCancelBtn">Cancel</button>
+        <button class="btn btn-danger"             id="deleteConfirmBtn">🗑️ Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Overwrite conflict modal ──────────────────────────── -->
+  <div id="overwriteModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="overwriteModalTitle">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title" id="overwriteModalTitle">⚠️ File conflict</h2>
+        <button class="modal-close" id="overwriteModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <p id="overwriteModalMsg" style="font-size:14px;line-height:1.6;"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary-neutral" id="overwriteCancelBtn">Cancel</button>
+        <button class="btn btn-secondary-neutral" id="overwriteSkipBtn">Skip existing</button>
+        <button class="btn btn-primary-sm"        id="overwriteConfirmBtn">Overwrite all</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── File viewer modal ──────────────────────────────────── -->
+  <div id="viewModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="viewModalTitle">
+    <div class="modal view-modal">
+      <div class="modal-header view-modal-header">
+        <div class="view-modal-title-group">
+          <h2 class="modal-title" id="viewModalTitle"></h2>
+          <span id="viewLangBadge" class="view-lang-badge"></span>
+        </div>
+        <div class="view-modal-actions">
+          <button id="viewWrapBtn" class="btn btn-icon btn-small" title="Toggle word wrap">↵ Wrap</button>
+          <button id="viewCopyBtn" class="btn btn-icon btn-small" title="Copy content">📋 Copy</button>
+          <button id="viewDlBtn"   class="btn btn-icon btn-small" title="Download">⬇ Download</button>
+          <button class="modal-close" id="viewModalClose" aria-label="Close">×</button>
+        </div>
+      </div>
+      <div id="viewModalBody" class="modal-body view-modal-body"></div>
+      <div class="modal-footer view-modal-footer">
+        <span id="viewFileMeta" class="view-file-meta"></span>
+        <button class="btn btn-secondary-neutral" id="viewCloseBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── File editor modal ─────────────────────────────────── -->
+  <div id="editModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="editModalTitle">
+    <div class="modal view-modal">
+      <div class="modal-header view-modal-header">
+        <div class="view-modal-title-group">
+          <h2 class="modal-title" id="editModalTitle"></h2>
+          <span id="editLangBadge" class="view-lang-badge"></span>
+        </div>
+        <div class="view-modal-actions">
+          <button id="editSaveBtn" class="btn btn-primary-sm">💾 Save</button>
+          <button class="modal-close" id="editModalClose" aria-label="Close">×</button>
+        </div>
+      </div>
+      <div class="modal-body edit-modal-body">
+        <textarea id="editContent" class="edit-textarea" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+      </div>
+      <div class="modal-footer view-modal-footer">
+        <span id="editFileMeta" class="view-file-meta"></span>
+        <button class="btn btn-secondary-neutral" id="editCancelBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+  <!-- ── New item modal ──────────────────────────────── -->
+  <div id="newModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="newModalTitle">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title" id="newModalTitle">New</h2>
+        <button class="modal-close" id="newModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="new-type-toggle" role="group" aria-label="Item type">
+          <button class="new-type-btn active" id="newTypeFolderBtn">📁 Folder</button>
+          <button class="new-type-btn" id="newTypeFileBtn">📄 File</button>
+        </div>
+        <label class="rename-label" for="newNameInput" id="newNameLabel">Folder name</label>
+        <input type="text" id="newNameInput" class="rename-input" spellcheck="false" placeholder="my-folder" />
+        <div id="newFileContentWrap" class="hidden" style="margin-top:12px">
+          <label class="rename-label" for="newFileContent">Content <span style="font-weight:400;color:var(--text-muted)">(optional)</span></label>
+          <textarea id="newFileContent" class="rename-input new-file-textarea" spellcheck="false" placeholder="File content…"></textarea>
+        </div>
+        <p class="rename-error hidden" id="newModalError"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary-neutral" id="newCancelBtn">Cancel</button>
+        <button class="btn btn-primary-sm" id="newConfirmBtn">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Location info modal ───────────────────────────── -->
+  <div id="infoModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="infoModalTitle">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title" id="infoModalTitle">Location info</h2>
+        <button class="modal-close" id="infoModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <table class="props-table" id="infoTable"></table>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary-neutral" id="infoCloseBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ── SAS generator modal ──────────────────────────── -->
+  <div id="sasModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="sasModalTitle">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <h2 class="modal-title" id="sasModalTitle">Generate SAS</h2>
+        <button class="modal-close" id="sasModalClose" aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="sasItemInfo" class="sas-item-info"></p>
+        <div class="sas-form">
+          <div class="sas-row">
+            <div class="sas-field">
+              <label class="rename-label" for="sasStart">Start <span class="sas-hint">(local time &mdash; leave blank to start immediately)</span></label>
+              <input type="datetime-local" id="sasStart" class="rename-input sas-datetime" />
+            </div>
+            <div class="sas-field">
+              <label class="rename-label" for="sasExpiry">Expiry <span class="sas-required">*</span> <span class="sas-hint">(local time)</span></label>
+              <input type="datetime-local" id="sasExpiry" class="rename-input sas-datetime" required />
+            </div>
+          </div>
+          <div class="sas-row">
+            <div class="sas-field sas-field-full">
+              <label class="rename-label" for="sasIp">Allowed IP / range <span class="sas-hint">(e.g. 1.2.3.4 or 1.2.3.0&ndash;1.2.3.255 &mdash; leave blank for any)</span></label>
+              <input type="text" id="sasIp" class="rename-input" placeholder="Any IP address" spellcheck="false" />
+            </div>
+          </div>
+          <div class="sas-row">
+            <div class="sas-field sas-field-full">
+              <label class="rename-label">Permissions</label>
+              <div id="sasPermissions" class="sas-perm-group"></div>
+            </div>
+          </div>
+        </div>
+        <p class="sas-folder-note hidden" id="sasFolderNote">
+          &#x2139;&#xFE0F; Folder SAS is issued at container scope &mdash; it grants access to <em>all blobs</em> in this container, not just the selected folder.
+        </p>
+        <p class="rename-error hidden" id="sasError"></p>
+        <div id="sasResultWrap" class="sas-result-wrap hidden">
+          <label class="rename-label">Generated SAS URL</label>
+          <div class="sas-result-row">
+            <textarea id="sasResult" class="rename-input sas-result-textarea" readonly spellcheck="false"></textarea>
+            <button class="btn btn-icon btn-small sas-copy-btn" id="sasCopyBtn" title="Copy SAS URL">&#x1F4CB; Copy</button>
+          </div>
+          <p class="sas-expires-note" id="sasExpiresNote"></p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary-neutral" id="sasCancelBtn">Close</button>
+        <button class="btn btn-primary-sm" id="sasGenerateBtn">&#x1F511; Generate</button>
+      </div>
+    </div>
+  </div>
+  <!-- ── Toast notification ───────────────────────────── -->
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+  <!-- ── Scripts (order matters) ──────────────────────────── -->
+  <script src="config.js"></script>
+  <script src="auth.js"></script>
+  <script src="arm.js"></script>
+  <script src="storage.js"></script>
+  <script src="app.js"></script>
+
+</body>
+</html>
