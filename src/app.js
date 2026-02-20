@@ -1279,7 +1279,7 @@ async function _showEditModal(file) {
       await uploadBlob(file.name, newFile, null, meta);
       close();
       _loadFiles(_currentPrefix);
-      _showToast(`✅ "${_esc(file.displayName)}" saved`);
+      _showToast(`✅ "${file.displayName}" saved`);
     } catch (err) {
       metaEl.textContent = `Save failed: ${_esc(err.message)}`;
       saveBtn.disabled = false;
