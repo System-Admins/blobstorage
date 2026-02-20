@@ -24,6 +24,10 @@
       <button id="signInBtn" class="btn btn-primary">
         Sign in with Microsoft
       </button>
+      <div class="sign-in-divider"><span>or</span></div>
+      <button id="openSasSignInBtn" class="btn btn-secondary">
+        🔑 Open SAS URL
+      </button>
     </div>
   </div>
 
@@ -412,6 +416,37 @@
       </div>
     </div>
   </div>
+  <!-- ── Open SAS modal ──────────────────────────────── -->
+  <div id="openSasModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="openSasModalTitle">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title" id="openSasModalTitle">Open SAS URL</h2>
+        <button class="modal-close" id="openSasModalClose" aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="open-sas-desc">Paste a Shared Access Signature (SAS) URL to browse a container, folder or file without signing in.</p>
+        <label class="rename-label" for="openSasInput">SAS URL</label>
+        <textarea id="openSasInput" class="rename-input open-sas-textarea" spellcheck="false" placeholder="https://account.blob.core.windows.net/container?sp=rl&amp;st=...&amp;sig=..."></textarea>
+        <div id="openSasParsed" class="open-sas-parsed hidden">
+          <table class="props-table open-sas-info-table">
+            <tr><td class="props-label">Account</td><td class="props-value" id="openSasAccount"></td></tr>
+            <tr><td class="props-label">Container</td><td class="props-value" id="openSasContainer"></td></tr>
+            <tr><td class="props-label">Path</td><td class="props-value" id="openSasPath"></td></tr>
+            <tr><td class="props-label">Permissions</td><td class="props-value" id="openSasPerms"></td></tr>
+            <tr><td class="props-label">Valid from</td><td class="props-value" id="openSasStart"></td></tr>
+            <tr><td class="props-label">Expires</td><td class="props-value" id="openSasExpiry"></td></tr>
+            <tr><td class="props-label">Resource</td><td class="props-value" id="openSasResource"></td></tr>
+          </table>
+        </div>
+        <p class="rename-error hidden" id="openSasError"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary-neutral" id="openSasCancelBtn">Cancel</button>
+        <button class="btn btn-primary-sm" id="openSasOpenBtn" disabled>🔑 Open</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Toast notification ───────────────────────────── -->
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   <!-- ── Scripts (order matters) ──────────────────────────── -->

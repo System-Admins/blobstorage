@@ -5,6 +5,126 @@
 
 const _API_VERSION = "2020-10-02";
 
+// ── SAS mode state ───────────────────────────────────────────
+// When active, all API calls use the SAS token instead of Bearer auth.
+const _SAS_STATE = {
+  active:        false,   // true when browsing via a SAS URL
+  accountName:   "",
+  containerName: "",
+  blobPrefix:    "",      // initial blob/folder prefix from the URL ("" = container root)
+  sasQuery:      "",      // full query string including "?" — appended to every request
+  permissions:   "",      // sp= value (e.g. "rl", "rwdl")
+  expiry:        null,    // Date object for se= (null if not present)
+  start:         null,    // Date object for st= (null if not present)
+  signedResource:"",      // sr= value: "c" (container), "b" (blob), "d" (directory)
+};
+
+/** Returns true when the explorer is operating in SAS-token mode. */
+function isSasMode() { return _SAS_STATE.active; }
+
+/** Returns the current SAS mode state (read-only snapshot). */
+function getSasState() { return { ..._SAS_STATE }; }
+
+/**
+ * Parse a SAS URL and activate SAS mode.
+ * Supports container, folder (directory/prefix) and single-blob SAS URLs.
+ *
+ * Examples:
+ *   https://account.blob.core.windows.net/container?sv=...&sig=...
+ *   https://account.blob.core.windows.net/container/folder/path?sv=...&sig=...
+ *   https://account.blob.core.windows.net/container/file.txt?sv=...&sig=...
+ *
+ * @param {string} sasUrl  Full SAS URL
+ * @returns {{ accountName: string, containerName: string, blobPrefix: string, permissions: string }}
+ */
+function activateSasMode(sasUrl) {
+  const parsed = new URL(sasUrl);
+
+  // Extract account name from hostname (e.g. "myaccount.blob.core.windows.net")
+  const hostParts = parsed.hostname.split(".");
+  if (hostParts.length < 4 || hostParts[1] !== "blob") {
+    throw new Error("Invalid SAS URL: hostname must be <account>.blob.core.windows.net");
+  }
+  const accountName = hostParts[0];
+
+  // Path: /<container>  or  /<container>/<blobPath>
+  const pathSegments = parsed.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+  if (pathSegments.length === 0) {
+    throw new Error("Invalid SAS URL: missing container name in the path.");
+  }
+  const containerName = pathSegments[0];
+  const blobPrefix    = pathSegments.slice(1).join("/");
+
+  // Validate that the URL has a signature
+  if (!parsed.searchParams.get("sig")) {
+    throw new Error("Invalid SAS URL: missing \"sig\" parameter. Please provide a complete SAS URL.");
+  }
+
+  // Extract SAS metadata
+  const sp = parsed.searchParams.get("sp") || "";
+  const se = parsed.searchParams.get("se") || "";
+  const st = parsed.searchParams.get("st") || "";
+  const sr = parsed.searchParams.get("sr") || "";
+
+  _SAS_STATE.active         = true;
+  _SAS_STATE.accountName    = accountName;
+  _SAS_STATE.containerName  = containerName;
+  _SAS_STATE.blobPrefix     = blobPrefix;
+  _SAS_STATE.sasQuery       = parsed.search; // includes leading "?"
+  _SAS_STATE.permissions    = sp;
+  _SAS_STATE.expiry         = se ? new Date(se) : null;
+  _SAS_STATE.start          = st ? new Date(st) : null;
+  _SAS_STATE.signedResource = sr;
+
+  // Also update CONFIG.storage so the rest of the app sees the right account/container
+  CONFIG.storage.accountName  = accountName;
+  CONFIG.storage.containerName = containerName;
+
+  return { accountName, containerName, blobPrefix, permissions: sp };
+}
+
+/** Deactivate SAS mode (return to normal Bearer token auth). */
+function deactivateSasMode() {
+  _SAS_STATE.active         = false;
+  _SAS_STATE.accountName    = "";
+  _SAS_STATE.containerName  = "";
+  _SAS_STATE.blobPrefix     = "";
+  _SAS_STATE.sasQuery       = "";
+  _SAS_STATE.permissions    = "";
+  _SAS_STATE.expiry         = null;
+  _SAS_STATE.start          = null;
+  _SAS_STATE.signedResource = "";
+}
+
+/**
+ * Build auth headers for a storage request.
+ * In SAS mode returns empty object (token is in the query string).
+ * In normal mode returns the Authorization + x-ms-version headers.
+ */
+async function _storageAuthHeaders() {
+  if (_SAS_STATE.active) {
+    return { "x-ms-version": _API_VERSION };
+  }
+  const token = await getStorageToken();
+  return {
+    Authorization:  `Bearer ${token}`,
+    "x-ms-version": _API_VERSION,
+  };
+}
+
+/**
+ * Append the SAS query string to a URL when in SAS mode.
+ * In normal mode returns the URL unchanged.
+ * Handles URLs that may already have query parameters.
+ */
+function _sasUrl(url) {
+  if (!_SAS_STATE.active) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  // Strip the leading "?" from sasQuery when appending with "&"
+  const qs = _SAS_STATE.sasQuery.startsWith("?") ? _SAS_STATE.sasQuery.slice(1) : _SAS_STATE.sasQuery;
+  return url + sep + qs;
+}
+
 // ── Public API ───────────────────────────────────────────────
 
 /**
@@ -24,12 +144,11 @@ async function listBlobsAtPrefix(prefix = "") {
   let marker     = null;
 
   do {
-    const token    = await getStorageToken();
-    const url      = _buildListUrl(accountName, containerName, prefix, marker);
+    const authHeaders = await _storageAuthHeaders();
+    const url      = _sasUrl(_buildListUrl(accountName, containerName, prefix, marker));
     const response = await fetch(url, {
       headers: {
-        Authorization:  `Bearer ${token}`,
-        "x-ms-version": _API_VERSION,
+        ...authHeaders,
         "x-ms-date":    new Date().toUTCString(),
       },
     });
@@ -67,16 +186,13 @@ async function listBlobsAtPrefix(prefix = "") {
  */
 async function downloadBlob(blobName) {
   const { accountName, containerName } = CONFIG.storage;
-  const token = await getStorageToken();
+  const authHeaders = await _storageAuthHeaders();
 
-  const url = `https://${accountName}.blob.core.windows.net`
-            + `/${containerName}/${_encodePath(blobName)}`;
+  const url = _sasUrl(`https://${accountName}.blob.core.windows.net`
+            + `/${containerName}/${_encodePath(blobName)}`);
 
   const response = await fetch(url, {
-    headers: {
-      Authorization:  `Bearer ${token}`,
-      "x-ms-version": _API_VERSION,
-    },
+    headers: authHeaders,
   });
 
   if (!response.ok) {
@@ -144,15 +260,12 @@ async function uploadBlob(blobPath, file, onProgress, metadata = {}) {
     const blockId = btoa(String(i).padStart(10, "0")); // fixed-length base64 block ID
     blockIds.push(blockId);
 
-    const token    = await getStorageToken(); // re-acquire silently in case it expired
-    const blockUrl = `${blobUrl}?comp=block&blockid=${encodeURIComponent(blockId)}`;
+    const authHeaders = await _storageAuthHeaders();
+    const blockUrl = _sasUrl(`${blobUrl}?comp=block&blockid=${encodeURIComponent(blockId)}`);
 
     const res = await fetch(blockUrl, {
       method: "PUT",
-      headers: {
-        Authorization:  `Bearer ${token}`,
-        "x-ms-version": _API_VERSION,
-      },
+      headers: authHeaders,
       body: chunk,
     });
 
@@ -169,17 +282,16 @@ async function uploadBlob(blobPath, file, onProgress, metadata = {}) {
   }
 
   // ── Commit block list ────────────────────────────────────────
-  const commitToken  = await getStorageToken();
+  const commitAuthHeaders = await _storageAuthHeaders();
   const blockListXml =
     `<?xml version="1.0" encoding="utf-8"?><BlockList>` +
     blockIds.map(id => `<Latest>${id}</Latest>`).join("") +
     `</BlockList>`;
 
-  const commitRes = await fetch(`${blobUrl}?comp=blocklist`, {
+  const commitRes = await fetch(_sasUrl(`${blobUrl}?comp=blocklist`), {
     method: "PUT",
     headers: {
-      Authorization:              `Bearer ${commitToken}`,
-      "x-ms-version":             _API_VERSION,
+      ...commitAuthHeaders,
       "Content-Type":             "application/xml",
       "x-ms-blob-content-type":   contentType,
       ..._buildMetaHeaders(metadata),
@@ -196,12 +308,11 @@ async function uploadBlob(blobPath, file, onProgress, metadata = {}) {
 }
 
 async function _putWholeBlob(blobUrl, file, contentType, metadata = {}) {
-  const token = await getStorageToken();
-  const res   = await fetch(blobUrl, {
+  const authHeaders = await _storageAuthHeaders();
+  const res   = await fetch(_sasUrl(blobUrl), {
     method:  "PUT",
     headers: {
-      Authorization:    `Bearer ${token}`,
-      "x-ms-version":  _API_VERSION,
+      ...authHeaders,
       "x-ms-blob-type": "BlockBlob",
       "Content-Type":  contentType,
       "Content-Length": String(file.size),
@@ -253,6 +364,12 @@ async function getBlobMetadata(blobName) {
  * Returns false → user has Reader only (or the probe failed).
  */
 async function probeUploadPermission() {
+  // In SAS mode, derive permission from the sp= parameter — no probe needed
+  if (_SAS_STATE.active) {
+    // Write access requires at least 'w' (write) or 'c' (create) or 'a' (add)
+    return /[wca]/.test(_SAS_STATE.permissions);
+  }
+
   const { accountName, containerName } = CONFIG.storage;
   let token;
   try { token = await getStorageToken(); } catch { return false; }
@@ -305,13 +422,13 @@ async function probeUploadPermission() {
  */
 async function deleteBlob(blobName) {
   const { accountName, containerName } = CONFIG.storage;
-  const token = await getStorageToken();
-  const url   = `https://${accountName}.blob.core.windows.net`
-              + `/${containerName}/${_encodePath(blobName)}`;
+  const authHeaders = await _storageAuthHeaders();
+  const url   = _sasUrl(`https://${accountName}.blob.core.windows.net`
+              + `/${containerName}/${_encodePath(blobName)}`);
 
   const res = await fetch(url, {
     method:  "DELETE",
-    headers: { Authorization: `Bearer ${token}`, "x-ms-version": _API_VERSION },
+    headers: authHeaders,
   });
 
   if (!res.ok) {
@@ -342,7 +459,6 @@ async function deleteFolderContents(prefix) {
  */
 async function downloadFolderAsZip(prefix, displayName, onProgress) {
   const { accountName, containerName } = CONFIG.storage;
-  const token = await getStorageToken();
 
   // Recursively collect every blob name under this prefix
   async function collectFiles(pfx) {
@@ -358,10 +474,11 @@ async function downloadFolderAsZip(prefix, displayName, onProgress) {
   // Fetch each blob and build ZIP entries
   const entries = [];
   for (let i = 0; i < allNames.length; i++) {
+    const authHeaders = await _storageAuthHeaders();
     const name = allNames[i];
-    const url = `https://${accountName}.blob.core.windows.net/${containerName}/${_encodePath(name)}`;
+    const url = _sasUrl(`https://${accountName}.blob.core.windows.net/${containerName}/${_encodePath(name)}`);
     const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}`, "x-ms-version": _API_VERSION },
+      headers: authHeaders,
     });
     if (!res.ok) throw new Error(`Failed to fetch "${name}" (${res.status})`);
     const data = new Uint8Array(await res.arrayBuffer());
@@ -390,13 +507,13 @@ async function downloadFolderAsZip(prefix, displayName, onProgress) {
  */
 async function getBlobProperties(blobName) {
   const { accountName, containerName } = CONFIG.storage;
-  const token = await getStorageToken();
-  const url   = `https://${accountName}.blob.core.windows.net`
-              + `/${containerName}/${_encodePath(blobName)}`;
+  const authHeaders = await _storageAuthHeaders();
+  const url   = _sasUrl(`https://${accountName}.blob.core.windows.net`
+              + `/${containerName}/${_encodePath(blobName)}`);
 
   const res = await fetch(url, {
     method:  "HEAD",
-    headers: { Authorization: `Bearer ${token}`, "x-ms-version": _API_VERSION },
+    headers: authHeaders,
   });
 
   if (!res.ok) throw new Error(`Properties request failed (${res.status})`);
@@ -413,12 +530,12 @@ async function getBlobProperties(blobName) {
  */
 async function blobExists(blobName) {
   const { accountName, containerName } = CONFIG.storage;
-  const token = await getStorageToken();
-  const url   = `https://${accountName}.blob.core.windows.net`
-              + `/${containerName}/${_encodePath(blobName)}`;
+  const authHeaders = await _storageAuthHeaders();
+  const url   = _sasUrl(`https://${accountName}.blob.core.windows.net`
+              + `/${containerName}/${_encodePath(blobName)}`);
   const res = await fetch(url, {
     method:  "HEAD",
-    headers: { Authorization: `Bearer ${token}`, "x-ms-version": _API_VERSION },
+    headers: authHeaders,
   });
   return res.status === 200;
 }
@@ -431,18 +548,17 @@ async function blobExists(blobName) {
  */
 async function renameBlob(srcName, destName) {
   const { accountName, containerName } = CONFIG.storage;
-  const token    = await getStorageToken();
+  const authHeaders = await _storageAuthHeaders();
   const baseUrl  = `https://${accountName}.blob.core.windows.net/${containerName}`;
   const srcUrl   = `${baseUrl}/${_encodePath(srcName)}`;
   const destUrl  = `${baseUrl}/${_encodePath(destName)}`;
 
-  // Copy
-  const copyRes = await fetch(destUrl, {
+  // Copy — note: in SAS mode the copy-source URL also needs the SAS token
+  const copyRes = await fetch(_sasUrl(destUrl), {
     method:  "PUT",
     headers: {
-      Authorization:      `Bearer ${token}`,
-      "x-ms-version":    _API_VERSION,
-      "x-ms-copy-source": srcUrl,
+      ...authHeaders,
+      "x-ms-copy-source": _sasUrl(srcUrl),
     },
   });
   if (!copyRes.ok) {
@@ -451,10 +567,10 @@ async function renameBlob(srcName, destName) {
   }
 
   // Delete source
-  const delToken = await getStorageToken();
-  const delRes   = await fetch(srcUrl, {
+  const delAuthHeaders = await _storageAuthHeaders();
+  const delRes   = await fetch(_sasUrl(srcUrl), {
     method:  "DELETE",
-    headers: { Authorization: `Bearer ${delToken}`, "x-ms-version": _API_VERSION },
+    headers: delAuthHeaders,
   });
   if (!delRes.ok) {
     const text = await delRes.text();
@@ -844,15 +960,14 @@ async function listAllBlobs(nameFilter = "") {
   let marker   = null;
 
   do {
-    const token  = await getStorageToken();
+    const authHeaders = await _storageAuthHeaders();
     const params = new URLSearchParams({ restype: "container", comp: "list", include: "metadata" });
     if (marker) params.set("marker", marker);
-    const url = `https://${accountName}.blob.core.windows.net/${containerName}?${params}`;
+    const url = _sasUrl(`https://${accountName}.blob.core.windows.net/${containerName}?${params}`);
 
     const response = await fetch(url, {
       headers: {
-        Authorization:  `Bearer ${token}`,
-        "x-ms-version": _API_VERSION,
+        ...authHeaders,
         "x-ms-date":    new Date().toUTCString(),
       },
     });

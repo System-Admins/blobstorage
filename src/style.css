@@ -106,6 +106,66 @@ body {
   margin-bottom: 32px;
 }
 
+.sign-in-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.sign-in-divider::before,
+.sign-in-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* ── Open SAS modal ────────────────────────────────────────── */
+.open-sas-desc {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
+.open-sas-textarea {
+  min-height: 72px;
+  font-family: monospace;
+  font-size: 12px;
+  resize: vertical;
+  word-break: break-all;
+}
+.open-sas-parsed {
+  margin-top: 16px;
+  padding: 12px;
+  background: var(--surface-alt, #f8f9fa);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.open-sas-info-table .props-label { width: 110px; }
+
+.sas-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-weight: 600;
+}
+.sas-badge-active {
+  background: #fff3cd;
+  color: #856404;
+}
+.sas-badge-expired {
+  background: #f8d7da;
+  color: #721c24;
+}
+.open-sas-header-btn {
+  margin-right: 4px;
+}
+
 /* ── Header ───────────────────────────────────────────────── */
 
 .main-app {

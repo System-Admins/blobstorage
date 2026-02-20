@@ -24,7 +24,7 @@ const _STORAGE_SELECTION_KEY = "be_storage_selection";
 // Derived permission flags — depend on both RBAC probe and config switches
 function _canRenameItems() { return _canUpload && (CONFIG.app.allowRename !== false); }
 function _canDeleteItems() { return _canUpload && (CONFIG.app.allowDelete !== false); }
-function _canSas()         { return _canUpload && CONFIG.app.allowSas !== false; }
+function _canSas()         { return !isSasMode() && _canUpload && CONFIG.app.allowSas !== false; }
 function _canEditItems()   { return _canUpload; }
 
 // ── Entry point ──────────────────────────────────────────────
@@ -78,6 +78,267 @@ function _showSignInPage() {
       _showLoading(false);
     }
   }, { once: true });
+
+  // Wire the "Open SAS" button on the sign-in page
+  _el("openSasSignInBtn").addEventListener("click", () => _showOpenSasModal(), { once: false });
+}
+
+// ── Open SAS modal ─────────────────────────────────────────
+
+const _SAS_PERM_LABELS = {
+  r: "Read", a: "Add", c: "Create", w: "Write",
+  d: "Delete", l: "List", t: "Tags", x: "Execute",
+  f: "Find", m: "Move", e: "Permanent delete", i: "Set immutability",
+  o: "Ownership", p: "Permissions",
+};
+
+function _showOpenSasModal() {
+  const overlay   = _el("openSasModal");
+  const input     = _el("openSasInput");
+  const openBtn   = _el("openSasOpenBtn");
+  const errEl     = _el("openSasError");
+  const parsed    = _el("openSasParsed");
+  const closeBtn  = _el("openSasModalClose");
+  const cancelBtn = _el("openSasCancelBtn");
+
+  // Reset state
+  input.value = "";
+  openBtn.disabled = true;
+  errEl.classList.add("hidden");
+  parsed.classList.add("hidden");
+  overlay.classList.remove("hidden");
+  input.focus();
+
+  let _parsedSas = null;
+
+  // Live-parse the URL as the user types/pastes
+  input.oninput = () => {
+    const raw = input.value.trim();
+    errEl.classList.add("hidden");
+    parsed.classList.add("hidden");
+    openBtn.disabled = true;
+    _parsedSas = null;
+
+    if (!raw) return;
+
+    try {
+      const info = activateSasMode(raw);
+      // Read full state after activation
+      const state = getSasState();
+      // Show parsed info
+      _el("openSasAccount").textContent   = info.accountName;
+      _el("openSasContainer").textContent = info.containerName;
+      _el("openSasPath").textContent      = info.blobPrefix || "(container root)";
+
+      // Friendly permission labels
+      const permLabels = info.permissions.split("").map(ch => _SAS_PERM_LABELS[ch] || ch).join(", ");
+      _el("openSasPerms").textContent = permLabels || "(not specified)";
+
+      _el("openSasStart").textContent  = state.start  ? state.start.toLocaleString()  : "(immediate)";
+      _el("openSasExpiry").textContent = state.expiry ? state.expiry.toLocaleString() : "(not set)";
+
+      const resourceLabels = { c: "Container", b: "Blob", d: "Directory" };
+      _el("openSasResource").textContent = resourceLabels[state.signedResource] || state.signedResource || "(not specified)";
+
+      parsed.classList.remove("hidden");
+      openBtn.disabled = false;
+      _parsedSas = { raw, info, state };
+
+      // Deactivate SAS mode now — we only activated it temporarily for parsing
+      deactivateSasMode();
+    } catch (e) {
+      deactivateSasMode();
+      errEl.textContent = e.message;
+      errEl.classList.remove("hidden");
+    }
+  };
+
+  const close = () => {
+    deactivateSasMode();
+    overlay.classList.add("hidden");
+    input.oninput = null;
+    openBtn.onclick = null;
+    closeBtn.onclick = null;
+    cancelBtn.onclick = null;
+    if (_escHandler) { overlay.removeEventListener("keydown", _escHandler); }
+  };
+
+  openBtn.onclick = () => {
+    if (!_parsedSas) return;
+    close();
+    // Re-activate SAS mode with the validated URL
+    activateSasMode(_parsedSas.raw);
+    _bootSasMode(_parsedSas.info, _parsedSas.state);
+  };
+
+  closeBtn.onclick = close;
+  cancelBtn.onclick = close;
+
+  const _escHandler = (e) => { if (e.key === "Escape") close(); };
+  overlay.addEventListener("keydown", _escHandler);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); }, { once: true });
+}
+
+/**
+ * Boot the app in SAS-token browsing mode.
+ * Similar to _bootApp but skips OAuth-dependent features.
+ */
+function _bootSasMode(info, state) {
+  _el("signInPage").classList.add("hidden");
+  _el("pickerPage").classList.add("hidden");
+  _el("mainApp").classList.remove("hidden");
+  document.title = CONFIG.app.title;
+
+  // Header info
+  _el("userDisplayName").textContent = "";
+  _el("userInfo").classList.add("hidden");
+  _el("storageInfo").textContent =
+    `${info.accountName} / ${info.containerName}`;
+
+  // Hide OAuth-only controls
+  _el("signOutBtn").classList.add("hidden");
+  _el("changeStorageBtn").classList.add("hidden");
+
+  // Show SAS badge with expiry info
+  const badge = _el("permBadge");
+  if (state.expiry) {
+    const now = new Date();
+    if (state.expiry < now) {
+      badge.textContent = "🔑 SAS Expired";
+      badge.className = "sas-badge sas-badge-expired";
+    } else {
+      badge.textContent = "🔑 SAS Active";
+      badge.className = "sas-badge sas-badge-active";
+    }
+  } else {
+    badge.textContent = "🔑 SAS";
+    badge.className = "sas-badge sas-badge-active";
+  }
+  badge.classList.remove("hidden");
+
+  // Add an "Open SAS" button in the header for switching SAS URLs & a "Disconnect" button
+  let sasBtnHeader = document.getElementById("openSasHeaderBtn");
+  if (!sasBtnHeader) {
+    sasBtnHeader = document.createElement("button");
+    sasBtnHeader.id = "openSasHeaderBtn";
+    sasBtnHeader.className = "btn btn-secondary open-sas-header-btn";
+    sasBtnHeader.title = "Open a different SAS URL";
+    sasBtnHeader.innerHTML = "🔑 <span class='btn-label'>Open SAS</span>";
+    _el("signOutBtn").parentNode.insertBefore(sasBtnHeader, _el("signOutBtn"));
+  }
+  sasBtnHeader.classList.remove("hidden");
+  sasBtnHeader.onclick = () => _showOpenSasModal();
+
+  let disconnectBtn = document.getElementById("sasDisconnectBtn");
+  if (!disconnectBtn) {
+    disconnectBtn = document.createElement("button");
+    disconnectBtn.id = "sasDisconnectBtn";
+    disconnectBtn.className = "btn btn-secondary";
+    disconnectBtn.title = "Disconnect SAS and return to sign-in";
+    disconnectBtn.textContent = "Disconnect";
+    sasBtnHeader.parentNode.insertBefore(disconnectBtn, sasBtnHeader.nextSibling);
+  }
+  disconnectBtn.classList.remove("hidden");
+  disconnectBtn.onclick = () => {
+    deactivateSasMode();
+    // Reset UI
+    _el("mainApp").classList.add("hidden");
+    _el("userInfo").classList.remove("hidden");
+    _el("signOutBtn").classList.remove("hidden");
+    _el("changeStorageBtn").classList.remove("hidden");
+    badge.className = "perm-badge hidden";
+    sasBtnHeader.classList.add("hidden");
+    disconnectBtn.classList.add("hidden");
+    _showSignInPage();
+  };
+
+  // Derive permissions from SAS sp= parameter
+  const perms = state.permissions || "";
+  const canRead   = perms.includes("r");
+  const canList   = perms.includes("l");
+  const canWrite  = /[wca]/.test(perms);
+  const canDelete = perms.includes("d");
+  _canUpload = canWrite;
+
+  // Show/hide upload controls based on write permission
+  _el("uploadBtn").classList.toggle("hidden", !canWrite);
+  _el("newBtn").classList.toggle("hidden", !canWrite);
+  _el("uploadPanel").classList.add("hidden");
+  _el("uploadBtn").classList.remove("active");
+  _uploadQueue   = [];
+  _uploadCounter = 0;
+  _el("uploadQueueList").innerHTML = "";
+  _el("uploadQueue").classList.add("hidden");
+
+  if (canWrite) {
+    _el("newBtn").onclick         = _showNewModal;
+    _el("uploadBtn").onclick      = _toggleUploadPanel;
+    _el("pickFilesBtn").onclick   = () => _el("fileInput").click();
+    _el("pickFolderBtn").onclick  = () => _el("folderInput").click();
+    _el("fileInput").onchange     = (e) => { _queueFiles(e.target.files); e.target.value = ""; };
+    _el("folderInput").onchange   = (e) => { _queueFiles(e.target.files); e.target.value = ""; };
+    _el("clearCompletedBtn").onclick = _clearCompleted;
+    _initDragDrop();
+  }
+
+  // Hide download-all if no read permission
+  _el("downloadAllBtn").classList.toggle("hidden", !canRead);
+
+  // Reset search / sort state
+  _cachedFolders          = [];
+  _cachedFiles            = [];
+  _containerSearchResults = null;
+  _el("searchInput").value = "";
+  _el("searchClearBtn").classList.add("hidden");
+  _el("searchBar").classList.add("hidden");
+  _el("searchBtn").classList.remove("active");
+  _el("searchBanner").classList.add("hidden");
+
+  // Wire toolbar
+  _el("refreshBtn").onclick     = () => _loadFiles(_currentPrefix);
+  _el("reportBtn").onclick      = _exportReport;
+  _el("downloadAllBtn").onclick = _downloadCurrentLevel;
+  _el("infoBtn").onclick        = _showInfoModal;
+  _el("upBtn").onclick          = _goUp;
+  _el("footerYear").textContent = new Date().getFullYear();
+  _el("listViewBtn").onclick    = () => _setViewMode("list");
+  _el("gridViewBtn").onclick    = () => _setViewMode("grid");
+  _el("searchBtn").onclick      = _toggleSearchBar;
+  _el("searchInput").oninput    = _onSearchInput;
+  _el("searchInput").onkeydown  = (e) => { if (e.key === "Escape") _toggleSearchBar(); };
+  _el("searchClearBtn").onclick = _clearSearch;
+  document.querySelectorAll("input[name='searchScope']").forEach((r) => { r.onchange = _onSearchInput; });
+
+  // Initialize folder tree
+  _initFolderTree();
+
+  // Determine starting prefix
+  _currentPrefix  = "";
+  _listLoadFailed = false;
+  _listingPromise = null;
+  _selection.clear();
+
+  const startPrefix = info.blobPrefix;
+
+  // If the SAS is for a single blob (sr=b), navigate to its parent and auto-view/download
+  if (state.signedResource === "b" && startPrefix && !startPrefix.endsWith("/")) {
+    const parts = startPrefix.split("/");
+    const blobName = parts.pop();
+    const parentPrefix = parts.length ? parts.join("/") + "/" : "";
+    _listingPromise = _loadFiles(parentPrefix);
+    // Auto-show the blob after listing loads
+    _listingPromise.then(() => {
+      // Find the file in the cached list
+      const file = _cachedFiles.find(f => f.name === startPrefix);
+      if (file) _showViewModal(file);
+    }).catch(() => {});
+  } else {
+    // Container or directory SAS — navigate to the prefix
+    const prefix = startPrefix ? (startPrefix.endsWith("/") ? startPrefix : startPrefix + "/") : "";
+    _listingPromise = _loadFiles(prefix);
+  }
+
+  _showLoading(false);
 }
 
 // ── Storage picker ───────────────────────────────────────────
