@@ -3863,6 +3863,7 @@ function _toggleTheme() {
 
 function _updateThemeIcons() {
   const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  // Icon shows the action: ☀️ = "switch to light", 🌙 = "switch to dark"
   const icon = isDark ? "\u2600\ufe0f" : "\uD83C\uDF19";
   document.querySelectorAll(".theme-toggle").forEach((btn) => { btn.textContent = icon; });
 }
