@@ -7,7 +7,7 @@ A static single-page web app for managing files in Azure Blob Storage. Runs enti
 - **Browse & navigate** — virtual folders, breadcrumbs, collapsible folder tree sidebar
 - **Upload** — files and folders with drag-and-drop, progress bars, and overwrite conflict handling
 - **Download** — single files or entire folders as ZIP
-- **Create / Rename / Delete** — folders and files (Contributors only)
+- **Create / Rename / Delete / Copy / Move** — folders and files (Contributors only)
 - **View & Edit** — preview and edit text-based files in-browser (Contributors only)
 - **Search** — current folder (instant filter) or everything (deep scan)
 - **SAS generator** — User Delegation SAS URLs with configurable expiry, IP, and permissions
