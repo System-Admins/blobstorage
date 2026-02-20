@@ -224,7 +224,9 @@ async function _putWholeBlob(blobUrl, file, contentType, metadata = {}) {
 function _buildMetaHeaders(metadata = {}) {
   const headers = {};
   for (const [k, v] of Object.entries(metadata)) {
-    if (k && v) headers[`x-ms-meta-${k}`] = String(v);
+    if (k && v !== "" && v !== null && v !== undefined) {
+      headers[`x-ms-meta-${k}`] = String(v);
+    }
   }
   return headers;
 }
