@@ -30,6 +30,11 @@ async function listSubscriptions() {
   return (data.value || []).filter(s => s.state === "Enabled");
 }
 
+/** Encode a single ARM path segment to prevent path-traversal or injection. */
+function _encArmSegment(segment) {
+  return encodeURIComponent(segment);
+}
+
 /**
  * List all storage accounts in a subscription.
  * @param {string} subscriptionId
@@ -38,7 +43,7 @@ async function listSubscriptions() {
 async function listStorageAccounts(subscriptionId) {
   const token = await getArmToken();
   const res   = await fetch(
-    `${_ARM_BASE}/subscriptions/${subscriptionId}/providers/Microsoft.Storage/storageAccounts?api-version=${_ARM_VERSION}`,
+    `${_ARM_BASE}/subscriptions/${_encArmSegment(subscriptionId)}/providers/Microsoft.Storage/storageAccounts?api-version=${_ARM_VERSION}`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
   if (!res.ok) throw new Error(await _armError(res));
@@ -62,7 +67,7 @@ async function listStorageAccounts(subscriptionId) {
  */
 async function listContainers(subscriptionId, resourceGroup, accountName) {
   const token = await getArmToken();
-  const url   = `${_ARM_BASE}/subscriptions/${subscriptionId}/resourceGroups/${resourceGroup}/providers/Microsoft.Storage/storageAccounts/${accountName}/blobServices/default/containers?api-version=${_ARM_VERSION}`;
+  const url   = `${_ARM_BASE}/subscriptions/${_encArmSegment(subscriptionId)}/resourceGroups/${_encArmSegment(resourceGroup)}/providers/Microsoft.Storage/storageAccounts/${_encArmSegment(accountName)}/blobServices/default/containers?api-version=${_ARM_VERSION}`;
   const res   = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) throw new Error(await _armError(res));
   const data = await res.json();
@@ -134,8 +139,8 @@ async function getArmToken() {
 async function getBlobServiceCors(subscriptionId, resourceGroup, accountName) {
   try {
     const token = await getArmToken();
-    const url   = `${_ARM_BASE}/subscriptions/${subscriptionId}/resourceGroups/${resourceGroup}`
-                + `/providers/Microsoft.Storage/storageAccounts/${accountName}`
+    const url   = `${_ARM_BASE}/subscriptions/${_encArmSegment(subscriptionId)}/resourceGroups/${_encArmSegment(resourceGroup)}`
+                + `/providers/Microsoft.Storage/storageAccounts/${_encArmSegment(accountName)}`
                 + `/blobServices/default?api-version=${_ARM_VERSION}`;
     const res   = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) return true; // Can't confirm — keep account visible

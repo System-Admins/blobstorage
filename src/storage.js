@@ -38,6 +38,33 @@ function getSasState() { return { ..._SAS_STATE }; }
  * @returns {{ accountName: string, containerName: string, blobPrefix: string, permissions: string }}
  */
 function activateSasMode(sasUrl) {
+  const info = parseSasUrl(sasUrl);
+
+  _SAS_STATE.active         = true;
+  _SAS_STATE.accountName    = info.accountName;
+  _SAS_STATE.containerName  = info.containerName;
+  _SAS_STATE.blobPrefix     = info.blobPrefix;
+  _SAS_STATE.sasQuery       = info.sasQuery;
+  _SAS_STATE.permissions    = info.permissions;
+  _SAS_STATE.expiry         = info.expiry;
+  _SAS_STATE.start          = info.start;
+  _SAS_STATE.signedResource = info.signedResource;
+
+  // Also update CONFIG.storage so the rest of the app sees the right account/container
+  CONFIG.storage.accountName  = info.accountName;
+  CONFIG.storage.containerName = info.containerName;
+
+  return { accountName: info.accountName, containerName: info.containerName, blobPrefix: info.blobPrefix, permissions: info.permissions };
+}
+
+/**
+ * Parse a SAS URL without mutating any global state.
+ * Used for preview/validation before committing to SAS mode.
+ *
+ * @param {string} sasUrl  Full SAS URL
+ * @returns {{ accountName: string, containerName: string, blobPrefix: string, permissions: string, sasQuery: string, expiry: Date|null, start: Date|null, signedResource: string }}
+ */
+function parseSasUrl(sasUrl) {
   const parsed = new URL(sasUrl);
 
   // Extract account name from hostname (e.g. "myaccount.blob.core.windows.net")
@@ -66,21 +93,16 @@ function activateSasMode(sasUrl) {
   const st = parsed.searchParams.get("st") || "";
   const sr = parsed.searchParams.get("sr") || "";
 
-  _SAS_STATE.active         = true;
-  _SAS_STATE.accountName    = accountName;
-  _SAS_STATE.containerName  = containerName;
-  _SAS_STATE.blobPrefix     = blobPrefix;
-  _SAS_STATE.sasQuery       = parsed.search; // includes leading "?"
-  _SAS_STATE.permissions    = sp;
-  _SAS_STATE.expiry         = se ? new Date(se) : null;
-  _SAS_STATE.start          = st ? new Date(st) : null;
-  _SAS_STATE.signedResource = sr;
-
-  // Also update CONFIG.storage so the rest of the app sees the right account/container
-  CONFIG.storage.accountName  = accountName;
-  CONFIG.storage.containerName = containerName;
-
-  return { accountName, containerName, blobPrefix, permissions: sp };
+  return {
+    accountName,
+    containerName,
+    blobPrefix,
+    sasQuery:       parsed.search, // includes leading "?"
+    permissions:    sp,
+    expiry:         se ? new Date(se) : null,
+    start:          st ? new Date(st) : null,
+    signedResource: sr,
+  };
 }
 
 /** Deactivate SAS mode (return to normal Bearer token auth). */
