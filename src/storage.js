@@ -276,7 +276,6 @@ async function probeUploadPermission() {
         Authorization:     `Bearer ${token}`,
         "x-ms-version":   _API_VERSION,
         "x-ms-blob-type": "BlockBlob",
-        "Content-Length": "0",
       },
       body: "",
     });
