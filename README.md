@@ -11,7 +11,7 @@ Authentication is handled natively using the **OAuth 2.0 Authorization Code Flow
 | Feature | Details |
 |---|---|
 | 🔐 Authentication | Native OAuth 2.0 PKCE — no external libraries |
-| 🔄 Silent token refresh | Refresh tokens kept in `sessionStorage`; re-login only when session fully expires |
+| 🔄 Silent token refresh | Refresh tokens stored in `localStorage` for cross-tab persistence; tokens are accessible to JavaScript and should be protected against XSS |
 | 📁 Folder navigation | Virtual-directory browsing with breadcrumb trail, Up button, and folder tree sidebar |
 | 🌳 Folder tree sidebar | Collapsible tree panel showing the full container structure; clicking a node navigates directly |
 | 📋 / ⊞ Views | Toggle between list view (table) and grid view |
