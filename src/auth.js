@@ -1,11 +1,15 @@
 // ============================================================
 //  AUTH — OAuth 2.0 Authorization Code Flow + PKCE
 //  Pure browser implementation — no external libraries required
-//  Uses: fetch, crypto.subtle, sessionStorage, window.history
+//  Uses: fetch, crypto.subtle, sessionStorage, localStorage, window.history
 //  Depends on: config.js
 // ============================================================
 
-// ── Session-storage keys ─────────────────────────────────────
+// ── Storage keys ─────────────────────────────────────────────
+// Access token, expiry, user info, PKCE verifier and OAuth state are stored in
+// sessionStorage (cleared when the tab closes — limits XSS exposure).
+// The refresh token is stored in localStorage so the user stays signed in
+// across browser sessions until the token expires (~90 days for Entra ID).
 
 const _KEYS = {
   ACCESS_TOKEN:  "be_access_token",
@@ -73,7 +77,7 @@ async function initAuth() {
   }
 
   // ── Try a silent refresh ──
-  const rt = sessionStorage.getItem(_KEYS.REFRESH_TOKEN);
+  const rt = localStorage.getItem(_KEYS.REFRESH_TOKEN);
   if (rt) {
     try {
       await _doRefresh(rt);
@@ -135,7 +139,7 @@ async function getStorageToken() {
     return sessionStorage.getItem(_KEYS.ACCESS_TOKEN);
   }
 
-  const rt = sessionStorage.getItem(_KEYS.REFRESH_TOKEN);
+  const rt = localStorage.getItem(_KEYS.REFRESH_TOKEN);
   if (rt) {
     await _doRefresh(rt);
     return sessionStorage.getItem(_KEYS.ACCESS_TOKEN);
@@ -196,9 +200,10 @@ async function _fetchTokens(body) {
     String(Date.now() + (data.expires_in - 60) * 1000)
   );
 
-  // Persist refresh token (returned on first exchange and when rotated)
+  // Persist refresh token in localStorage so the session survives tab/browser close.
+  // (returned on first exchange and when rotated)
   if (data.refresh_token) {
-    sessionStorage.setItem(_KEYS.REFRESH_TOKEN, data.refresh_token);
+    localStorage.setItem(_KEYS.REFRESH_TOKEN, data.refresh_token);
   }
 
   // Decode user info from the id_token for display purposes
@@ -267,6 +272,7 @@ function _getUser() {
 
 function _clearSession() {
   Object.values(_KEYS).forEach((k) => sessionStorage.removeItem(k));
+  localStorage.removeItem(_KEYS.REFRESH_TOKEN);
 }
 
 /** Remove ?code=...&state=... from the browser URL without a page reload. */

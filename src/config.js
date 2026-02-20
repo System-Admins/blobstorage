@@ -66,3 +66,21 @@ const CONFIG = {
     maxFileSizeMB: 0,
   },
 };
+
+// ── Configuration validation ──────────────────────────────────
+// Detect placeholder values that must be replaced before deployment and
+// surface a clear error immediately so the problem is obvious to developers.
+(function _validateConfig() {
+  const placeholders = [
+    ["CONFIG.auth.clientId",  CONFIG.auth.clientId,  "CLIENT ID GOES HERE"],
+    ["CONFIG.auth.tenantId",  CONFIG.auth.tenantId,  "TENANT ID GOES HERE"],
+  ];
+  for (const [key, value, placeholder] of placeholders) {
+    if (value === placeholder) {
+      throw new Error(
+        `[config] ${key} is still set to its placeholder value "${placeholder}". ` +
+        "Update config.js with your actual Azure App Registration details before deploying."
+      );
+    }
+  }
+}());

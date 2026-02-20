@@ -524,7 +524,15 @@ function _encodePath(path) {
 }
 
 /**
- * Build a ZIP blob (store/no-compression) from an array of {name, data} entries.
+ * Build a ZIP blob from an array of {name, data} entries.
+ *
+ * Compression method: STORE (method 0 — no compression).
+ * Deflate compression is intentionally omitted to keep this implementation
+ * dependency-free and universally compatible. The files being packaged are
+ * already downloaded from Blob Storage (often already compressed formats such
+ * as images, videos, or Office documents), so a second compression pass would
+ * yield minimal size savings while adding significant CPU overhead.
+ *
  * @param {{name: string, data: Uint8Array}[]} entries
  * @returns {Blob}
  */
