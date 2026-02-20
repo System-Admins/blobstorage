@@ -126,7 +126,7 @@ function _showOpenSasModal() {
 
   let _parsedSas = null;
 
-  // Live-parse the URL as the user types/pastes
+  // Live-parse the URL as the user types/pastes (read-only — no global state mutation)
   input.oninput = () => {
     const raw = input.value.trim();
     errEl.classList.add("hidden");
@@ -137,9 +137,7 @@ function _showOpenSasModal() {
     if (!raw) return;
 
     try {
-      const info = activateSasMode(raw);
-      // Read full state after activation
-      const state = getSasState();
+      const info = parseSasUrl(raw);
       // Show parsed info
       _el("openSasAccount").textContent   = info.accountName;
       _el("openSasContainer").textContent = info.containerName;
@@ -149,27 +147,22 @@ function _showOpenSasModal() {
       const permLabels = info.permissions.split("").map(ch => _SAS_PERM_LABELS[ch] || ch).join(", ");
       _el("openSasPerms").textContent = permLabels || "(not specified)";
 
-      _el("openSasStart").textContent  = state.start  ? state.start.toLocaleString()  : "(immediate)";
-      _el("openSasExpiry").textContent = state.expiry ? state.expiry.toLocaleString() : "(not set)";
+      _el("openSasStart").textContent  = info.start  ? info.start.toLocaleString()  : "(immediate)";
+      _el("openSasExpiry").textContent = info.expiry ? info.expiry.toLocaleString() : "(not set)";
 
       const resourceLabels = { c: "Container", b: "Blob", d: "Directory" };
-      _el("openSasResource").textContent = resourceLabels[state.signedResource] || state.signedResource || "(not specified)";
+      _el("openSasResource").textContent = resourceLabels[info.signedResource] || info.signedResource || "(not specified)";
 
       parsed.classList.remove("hidden");
       openBtn.disabled = false;
-      _parsedSas = { raw, info, state };
-
-      // Deactivate SAS mode now — we only activated it temporarily for parsing
-      deactivateSasMode();
+      _parsedSas = { raw, info };
     } catch (e) {
-      deactivateSasMode();
       errEl.textContent = e.message;
       errEl.classList.remove("hidden");
     }
   };
 
   const close = () => {
-    deactivateSasMode();
     overlay.classList.add("hidden");
     input.oninput = null;
     openBtn.onclick = null;
@@ -181,9 +174,9 @@ function _showOpenSasModal() {
   openBtn.onclick = () => {
     if (!_parsedSas) return;
     close();
-    // Re-activate SAS mode with the validated URL
+    // Activate SAS mode with the validated URL (only now mutating global state)
     activateSasMode(_parsedSas.raw);
-    _bootSasMode(_parsedSas.info, _parsedSas.state);
+    _bootSasMode(_parsedSas.info, _parsedSas.info);
   };
 
   closeBtn.onclick = close;
@@ -1756,7 +1749,7 @@ async function _showEditModal(file) {
 
       // Preserve existing metadata; stamp last_edited_by_*
       let meta = {};
-      try { meta = await getBlobMetadata(file.name); } catch { /* ignore */ }
+      try { meta = await getBlobMetadata(file.name); } catch (e) { console.warn("[edit] Could not fetch metadata:", e.message); }
       const upn = user?.username || "";
       const oid = user?.oid      || "";
       if (upn) meta.last_edited_by_upn = upn;
@@ -2027,7 +2020,7 @@ function _showCopyMenu(btn, item, kind) {
   const { accountName, containerName } = CONFIG.storage;
   const encoded = item.name.split("/").map(encodeURIComponent).join("/");
   const blobUrl = `https://${accountName}.blob.core.windows.net/${containerName}/${encoded}`;
-  const appUrl  = `${window.location.origin}${window.location.pathname}#${item.name}`;
+  const appUrl  = `${window.location.origin}${window.location.pathname}#${encodeURIComponent(item.name)}`;
 
   const menu = document.createElement("div");
   menu.className = "copy-menu";
@@ -3065,18 +3058,18 @@ async function _showInfoModal() {
   const prefix = _currentPrefix;
   const displayPath = prefix ? prefix.replace(/\/$/, "") : "/";
 
-  const addRow = (label, value, muted = false) => {
+  const addRow = (label, value, isHtml = false) => {
     const tr = document.createElement("tr");
     const tdLabel = document.createElement("td"); tdLabel.textContent = label;
-    const tdVal   = document.createElement("td"); tdVal.innerHTML = value;
-    if (muted) tdVal.style.color = "var(--text-muted)";
+    const tdVal   = document.createElement("td");
+    if (isHtml) { tdVal.innerHTML = value; } else { tdVal.textContent = value; }
     tr.appendChild(tdLabel); tr.appendChild(tdVal);
     table.appendChild(tr);
   };
 
-  addRow("Account",   _esc(CONFIG.storage.accountName));
-  addRow("Container", _esc(CONFIG.storage.containerName));
-  addRow("Path",      `<code style="font-size:12px">${_esc(displayPath)}</code>`);
+  addRow("Account",   CONFIG.storage.accountName);
+  addRow("Container", CONFIG.storage.containerName);
+  addRow("Path",      `<code style="font-size:12px">${_esc(displayPath)}</code>`, true);
 
   // Spinner row
   const spinnerTr = document.createElement("tr");
@@ -3091,7 +3084,7 @@ async function _showInfoModal() {
     addRow("Total size", formatFileSize(totalSize));
   } catch (e) {
     spinnerTr.remove();
-    addRow("Error", _esc(e.message));
+    addRow("Error", e.message);
   }
 }
 
@@ -3301,7 +3294,7 @@ async function _buildUploadMetadata(isOverwrite, blobPath, user) {
   }
   // Overwrite — preserve original uploader, stamp last-edited
   let meta = {};
-  try { meta = await getBlobMetadata(blobPath); } catch { /* ignore */ }
+  try { meta = await getBlobMetadata(blobPath); } catch (e) { console.warn("[upload] Could not fetch metadata:", e.message); }
   if (upn) meta.last_edited_by_upn = upn;
   if (oid) meta.last_edited_by_oid = oid;
   return meta;

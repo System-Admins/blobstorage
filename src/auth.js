@@ -339,10 +339,14 @@ function _base64url(buf) {
 
 function _parseJwt(token) {
   try {
-    const b64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const parts = token.split(".");
+    if (parts.length !== 3) return {};
+    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
     const padLen = (4 - (b64.length % 4)) % 4;
     const padded = b64 + "=".repeat(padLen);
-    return JSON.parse(atob(padded));
+    const claims = JSON.parse(atob(padded));
+    if (typeof claims !== "object" || claims === null) return {};
+    return claims;
   } catch {
     return {};
   }
