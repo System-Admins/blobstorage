@@ -1689,10 +1689,33 @@ function _showRenameModal(item, type) {
         if (allBlobs.length === 0) {
           // No real blobs to move — just close and refresh
         } else {
-          for (const blob of allBlobs) {
-            const rel  = blob.slice(srcName.length);
-            const dest = destName + rel;
-            await renameBlob(blob, dest);
+          // Guard against excessively large operations that could hang the browser.
+          const MAX_RENAME_ITEMS = 5000;
+          if (allBlobs.length > MAX_RENAME_ITEMS) {
+            throw new Error(
+              `Folder is too large to rename in a single operation (${allBlobs.length} items). ` +
+              `Please move or rename smaller subsets.`
+            );
+          }
+
+          // Process renames in small batches with short delays to keep the UI responsive.
+          const BATCH_SIZE = 100;
+          const BATCH_DELAY_MS = 10;
+
+          for (let i = 0; i < allBlobs.length; i += BATCH_SIZE) {
+            const batch = allBlobs.slice(i, i + BATCH_SIZE);
+            await Promise.all(
+              batch.map(blob => {
+                const rel  = blob.slice(srcName.length);
+                const dest = destName + rel;
+                return renameBlob(blob, dest);
+              })
+            );
+
+            // Yield to the event loop between batches to avoid long blocking periods.
+            if (i + BATCH_SIZE < allBlobs.length) {
+              await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS));
+            }
           }
         }
       } else {
