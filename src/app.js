@@ -1144,6 +1144,96 @@ async function _doContainerSearch(term) {
   }
 }
 
+// ── Shared action-button helpers ──────────────────────────────
+// These helpers centralise the repeated HTML generation and event wiring
+// that was previously duplicated across _makeFolderRow, _makeFileRow,
+// _makeSearchFolderRow, _makeSearchResultRow, _makeFolderCard and _makeFileCard.
+
+/**
+ * Return the inner HTML for action buttons appropriate for a folder or file.
+ * @param {"folder"|"file"} type
+ * @param {string}  displayName  Used to test viewability for files
+ * @param {object}  opts
+ * @param {boolean} opts.compact  true → icon-only labels (grid cards)
+ * @param {string}  opts.extraHtml  Additional button HTML prepended to the list
+ */
+function _actionButtonsHtml(type, displayName, { compact = false, extraHtml = "" } = {}) {
+  const lbl = (icon, text) => compact ? icon : `${icon} ${text}`;
+  const isFolder = type === "folder";
+  return `${extraHtml}
+      <button class="btn-action btn-props" title="Properties">${lbl("ℹ️", "Info")}</button>
+      <button class="btn-action btn-copy-url" title="Copy URL">${lbl("🔗", "Copy URL")}</button>
+      ${_canSas() ? `<button class="btn-action btn-sas" title="Generate SAS">${lbl("🔑", "SAS")}</button>` : ""}
+      ${!isFolder && _isViewable(displayName) ? `<button class="btn-action btn-view" title="View file">${lbl("👁", "View")}</button>` : ""}
+      ${!isFolder && _isViewable(displayName) && _canEditItems() ? `<button class="btn-action btn-edit" title="Edit file">${lbl("📝", "Edit")}</button>` : ""}
+      ${isFolder && CONFIG.app.allowDownload ? `<button class="btn-action btn-dl-folder" title="Download as ZIP">${lbl("&#x2B07;", "Download")}</button>` : ""}
+      ${!isFolder && CONFIG.app.allowDownload ? `<button class="btn-action btn-dl" title="Download">${lbl("&#x2B07;", "Download")}</button>` : ""}
+      ${_canCopyItems() ? `<button class="btn-action btn-clone" title="Copy to…">${lbl("📋", "Copy")}</button>` : ""}
+      ${_canMoveItems() ? `<button class="btn-action btn-move" title="Move to…">${lbl("📦", "Move")}</button>` : ""}
+      ${_canRenameItems() ? `<button class="btn-action btn-rename" title="Rename">${lbl("✏️", "Rename")}</button>` : ""}
+      ${_canDeleteItems() ? `<button class="btn-action btn-action-danger btn-delete" title="Delete">${lbl("🗑️", "Delete")}</button>` : ""}`;
+}
+
+/**
+ * Wire action-button event listeners on a row or card element.
+ * Handles both folder and file items, and optionally calls stopPropagation
+ * (needed for cards where clicks on buttons should not trigger the card click).
+ *
+ * @param {Element}          el    The row (<tr>) or card (<div>) element
+ * @param {object}           item  Folder or file object
+ * @param {"folder"|"file"}  type
+ * @param {object}  opts
+ * @param {boolean} opts.stopPropagation  true for card elements
+ * @param {string}  opts.displayName      Override for viewability check (search results use derived name)
+ */
+function _wireItemActions(el, item, type, { stopPropagation = false, displayName } = {}) {
+  const isFolder = type === "folder";
+  const viewName = displayName ?? item.displayName;
+
+  const on = (sel, fn) => {
+    const btn = el.querySelector(sel);
+    if (!btn) return;
+    btn.addEventListener("click", (e) => {
+      if (stopPropagation) e.stopPropagation();
+      fn(e);
+    });
+  };
+
+  on(".btn-props",    () => isFolder ? _showFolderProperties(item) : _showProperties(item));
+  on(".btn-copy-url", (e) => _showCopyMenu(e.currentTarget, item, type));
+  on(".btn-sas",      () => _showSasModal(item, isFolder));
+  if (isFolder) {
+    on(".btn-dl-folder", () => _handleFolderDownload(item));
+  } else {
+    if (_isViewable(viewName))                    on(".btn-view", () => _showViewModal(item));
+    if (_isViewable(viewName) && _canEditItems()) on(".btn-edit", () => _showEditModal(item));
+    on(".btn-dl", () => _handleDownload(item));
+  }
+  on(".btn-clone",  () => _showCopyModal(item, type));
+  on(".btn-move",   () => _showMoveModal(item, type));
+  on(".btn-rename", () => _showRenameModal(item, type));
+  on(".btn-delete", () => _showDeleteModal(item, type));
+}
+
+/** Wire a row-level checkbox (table rows). */
+function _wireRowCheckbox(tr, name) {
+  tr.querySelector(".row-chk").addEventListener("change", (e) => {
+    if (e.target.checked) _selection.add(name); else _selection.delete(name);
+    tr.classList.toggle("row-selected", e.target.checked);
+    _updateSelectionBar();
+  });
+}
+
+/** Wire a card-level checkbox (grid cards — includes stopPropagation). */
+function _wireCardCheckbox(div, name) {
+  div.querySelector(".card-chk").addEventListener("change", (e) => {
+    e.stopPropagation();
+    if (e.target.checked) _selection.add(name); else _selection.delete(name);
+    div.classList.toggle("card-selected", e.target.checked);
+    _updateSelectionBar();
+  });
+}
+
 // ── List view ────────────────────────────────────────────────
 
 function _renderListView(container, folders, files) {
@@ -1246,33 +1336,15 @@ function _makeFolderRow(folder) {
     <td class="file-date">—</td>
     <td class="file-actions">
       <div class="row-actions">
-        <button class="btn-action btn-props" title="Properties">ℹ️ Info</button>
-        <button class="btn-action btn-copy-url" title="Copy URL">🔗 Copy URL</button>
-        ${_canSas() ? `<button class="btn-action btn-sas" title="Generate SAS">🔑 SAS</button>` : ""}
-        ${CONFIG.app.allowDownload ? `<button class="btn-action btn-dl-folder" title="Download as ZIP">&#x2B07; Download</button>` : ""}
-        ${_canCopyItems() ? `<button class="btn-action btn-clone" title="Copy to…">📋 Copy</button>` : ""}
-        ${_canMoveItems() ? `<button class="btn-action btn-move" title="Move to…">📦 Move</button>` : ""}
-        ${_canRenameItems() ? `<button class="btn-action btn-rename" title="Rename">✏️ Rename</button>` : ""}
-        ${_canDeleteItems() ? `<button class="btn-action btn-action-danger btn-delete" title="Delete">🗑️ Delete</button>` : ""}
+        ${_actionButtonsHtml("folder", folder.displayName)}
       </div>
     </td>`;
   tr.querySelector(".file-link").addEventListener("click", (e) => {
     e.preventDefault();
     _loadFiles(folder.name);
   });
-  tr.querySelector(".row-chk").addEventListener("change", (e) => {
-    if (e.target.checked) _selection.add(folder.name); else _selection.delete(folder.name);
-    tr.classList.toggle("row-selected", e.target.checked);
-    _updateSelectionBar();
-  });
-  tr.querySelector(".btn-props").addEventListener("click", () => _showFolderProperties(folder));
-  tr.querySelector(".btn-copy-url").addEventListener("click", (e) => _showCopyMenu(e.currentTarget, folder, "folder"));
-  if (_canSas()) tr.querySelector(".btn-sas").addEventListener("click", () => _showSasModal(folder, true));
-  if (CONFIG.app.allowDownload) tr.querySelector(".btn-dl-folder").addEventListener("click", () => _handleFolderDownload(folder));
-  if (_canCopyItems()) tr.querySelector(".btn-clone").addEventListener("click", () => _showCopyModal(folder, "folder"));
-  if (_canMoveItems()) tr.querySelector(".btn-move").addEventListener("click", () => _showMoveModal(folder, "folder"));
-  if (_canRenameItems()) tr.querySelector(".btn-rename").addEventListener("click", () => _showRenameModal(folder, "folder"));
-  if (_canDeleteItems()) tr.querySelector(".btn-delete").addEventListener("click", () => _showDeleteModal(folder, "folder"));
+  _wireRowCheckbox(tr, folder.name);
+  _wireItemActions(tr, folder, "folder");
   return tr;
 }
 
@@ -1305,33 +1377,11 @@ function _makeFileRow(file) {
     <td class="file-date">${formatDate(file.createdOn)}</td>
     <td class="file-actions">
       <div class="row-actions">
-        <button class="btn-action btn-props"    title="Properties">ℹ️ Info</button>
-        <button class="btn-action btn-copy-url" title="Copy URL">🔗 Copy URL</button>
-        ${_canSas() ? `<button class="btn-action btn-sas" title="Generate SAS">🔑 SAS</button>` : ""}
-        ${_isViewable(file.displayName) ? `<button class="btn-action btn-view" title="View file">👁 View</button>` : ""}
-        ${_isViewable(file.displayName) && _canEditItems() ? `<button class="btn-action btn-edit" title="Edit file">📝 Edit</button>` : ""}
-        ${CONFIG.app.allowDownload ? `<button class="btn-action btn-dl" title="Download">&#x2B07; Download</button>` : ""}
-        ${_canCopyItems() ? `<button class="btn-action btn-clone" title="Copy to…">📋 Copy</button>` : ""}
-        ${_canMoveItems() ? `<button class="btn-action btn-move" title="Move to…">📦 Move</button>` : ""}
-        ${_canRenameItems() ? `<button class="btn-action btn-rename" title="Rename">✏️ Rename</button>` : ""}
-        ${_canDeleteItems() ? `<button class="btn-action btn-action-danger btn-delete" title="Delete">🗑️ Delete</button>` : ""}
+        ${_actionButtonsHtml("file", file.displayName)}
       </div>
     </td>`;
-  tr.querySelector(".btn-props").addEventListener("click", () => _showProperties(file));
-  tr.querySelector(".row-chk").addEventListener("change", (e) => {
-    if (e.target.checked) _selection.add(file.name); else _selection.delete(file.name);
-    tr.classList.toggle("row-selected", e.target.checked);
-    _updateSelectionBar();
-  });
-  tr.querySelector(".btn-copy-url").addEventListener("click", (e) => _showCopyMenu(e.currentTarget, file, "file"));
-  if (_canSas()) tr.querySelector(".btn-sas").addEventListener("click", () => _showSasModal(file, false));
-  if (_isViewable(file.displayName)) tr.querySelector(".btn-view").addEventListener("click", () => _showViewModal(file));
-  if (_isViewable(file.displayName) && _canEditItems()) tr.querySelector(".btn-edit").addEventListener("click", () => _showEditModal(file));
-  if (CONFIG.app.allowDownload) tr.querySelector(".btn-dl").addEventListener("click", () => _handleDownload(file));
-  if (_canCopyItems()) tr.querySelector(".btn-clone").addEventListener("click", () => _showCopyModal(file, "file"));
-  if (_canMoveItems()) tr.querySelector(".btn-move").addEventListener("click", () => _showMoveModal(file, "file"));
-  if (_canRenameItems()) tr.querySelector(".btn-rename").addEventListener("click", () => _showRenameModal(file, "file"));
-  if (_canDeleteItems()) tr.querySelector(".btn-delete").addEventListener("click", () => _showDeleteModal(file, "file"));
+  _wireRowCheckbox(tr, file.name);
+  _wireItemActions(tr, file, "file");
   return tr;
 }
 
@@ -1398,14 +1448,7 @@ function _makeSearchFolderRow(folder) {
     <td class="file-date">—</td>
     <td class="file-actions">
       <div class="row-actions">
-        <button class="btn-action btn-props"    title="Properties">ℹ️ Info</button>
-        <button class="btn-action btn-copy-url" title="Copy URL">🔗 Copy URL</button>
-        ${_canSas() ? `<button class="btn-action btn-sas" title="Generate SAS">🔑 SAS</button>` : ""}
-        ${CONFIG.app.allowDownload ? `<button class="btn-action btn-dl-folder" title="Download as ZIP">&#x2B07; Download</button>` : ""}
-        ${_canCopyItems() ? `<button class="btn-action btn-clone" title="Copy to…">📋 Copy</button>` : ""}
-        ${_canMoveItems() ? `<button class="btn-action btn-move" title="Move to…">📦 Move</button>` : ""}
-        ${_canRenameItems() ? `<button class="btn-action btn-rename" title="Rename">✏️ Rename</button>` : ""}
-        ${_canDeleteItems() ? `<button class="btn-action btn-action-danger btn-delete" title="Delete">🗑️ Delete</button>` : ""}
+        ${_actionButtonsHtml("folder", folder.displayName)}
       </div>
     </td>`;
 
@@ -1414,19 +1457,8 @@ function _makeSearchFolderRow(folder) {
     _clearSearch();
     _loadFiles(folder.name);
   });
-  tr.querySelector(".row-chk").addEventListener("change", (e) => {
-    if (e.target.checked) _selection.add(folder.name); else _selection.delete(folder.name);
-    tr.classList.toggle("row-selected", e.target.checked);
-    _updateSelectionBar();
-  });
-  tr.querySelector(".btn-props").addEventListener("click", () => _showFolderProperties(folder));
-  tr.querySelector(".btn-copy-url").addEventListener("click", (e) => _showCopyMenu(e.currentTarget, folder, "folder"));
-  if (_canSas()) tr.querySelector(".btn-sas").addEventListener("click", () => _showSasModal(folder, true));
-  if (CONFIG.app.allowDownload) tr.querySelector(".btn-dl-folder").addEventListener("click", () => _handleFolderDownload(folder));
-  if (_canCopyItems()) tr.querySelector(".btn-clone").addEventListener("click", () => _showCopyModal(folder, "folder"));
-  if (_canMoveItems()) tr.querySelector(".btn-move").addEventListener("click", () => _showMoveModal(folder, "folder"));
-  if (_canRenameItems()) tr.querySelector(".btn-rename").addEventListener("click", () => _showRenameModal(folder, "folder"));
-  if (_canDeleteItems()) tr.querySelector(".btn-delete").addEventListener("click", () => _showDeleteModal(folder, "folder"));
+  _wireRowCheckbox(tr, folder.name);
+  _wireItemActions(tr, folder, "folder");
   return tr;
 }
 
@@ -1456,41 +1488,20 @@ function _makeSearchResultRow(file) {
     <td class="file-date">${formatDate(file.createdOn)}</td>
     <td class="file-actions">
       <div class="row-actions">
-        ${parentPrefix ? `<button class="btn-action btn-goto-folder" title="Open containing folder">📂 Folder</button>` : ""}
-        <button class="btn-action btn-props"    title="Properties">ℹ️ Info</button>
-        <button class="btn-action btn-copy-url" title="Copy URL">🔗 Copy URL</button>
-        ${_canSas() ? `<button class="btn-action btn-sas" title="Generate SAS">🔑 SAS</button>` : ""}
-        ${_isViewable(fileName) ? `<button class="btn-action btn-view" title="View file">👁 View</button>` : ""}
-        ${_isViewable(fileName) && _canEditItems() ? `<button class="btn-action btn-edit" title="Edit file">📝 Edit</button>` : ""}
-        ${CONFIG.app.allowDownload ? `<button class="btn-action btn-dl" title="Download">&#x2B07; Download</button>` : ""}
-        ${_canCopyItems() ? `<button class="btn-action btn-clone" title="Copy to…">📋 Copy</button>` : ""}
-        ${_canMoveItems() ? `<button class="btn-action btn-move" title="Move to…">📦 Move</button>` : ""}
-        ${_canRenameItems() ? `<button class="btn-action btn-rename" title="Rename">✏️ Rename</button>` : ""}
-        ${_canDeleteItems() ? `<button class="btn-action btn-action-danger btn-delete" title="Delete">🗑️ Delete</button>` : ""}
+        ${_actionButtonsHtml("file", fileName, {
+          extraHtml: parentPrefix ? `<button class="btn-action btn-goto-folder" title="Open containing folder">📂 Folder</button>` : "",
+        })}
       </div>
     </td>`;
 
-  tr.querySelector(".row-chk").addEventListener("change", (e) => {
-    if (e.target.checked) _selection.add(file.name); else _selection.delete(file.name);
-    tr.classList.toggle("row-selected", e.target.checked);
-    _updateSelectionBar();
-  });
+  _wireRowCheckbox(tr, file.name);
   if (parentPrefix) {
     tr.querySelector(".btn-goto-folder").addEventListener("click", () => {
       _clearSearch();
       _loadFiles(parentPrefix);
     });
   }
-  tr.querySelector(".btn-props").addEventListener("click", () => _showProperties(file));
-  tr.querySelector(".btn-copy-url").addEventListener("click", (e) => _showCopyMenu(e.currentTarget, file, "file"));
-  if (_canSas()) tr.querySelector(".btn-sas").addEventListener("click", () => _showSasModal(file, false));
-  if (_isViewable(fileName)) tr.querySelector(".btn-view").addEventListener("click", () => _showViewModal(file));
-  if (_isViewable(fileName) && _canEditItems()) tr.querySelector(".btn-edit").addEventListener("click", () => _showEditModal(file));
-  if (CONFIG.app.allowDownload) tr.querySelector(".btn-dl").addEventListener("click", () => _handleDownload(file));
-  if (_canCopyItems()) tr.querySelector(".btn-clone").addEventListener("click", () => _showCopyModal(file, "file"));
-  if (_canMoveItems()) tr.querySelector(".btn-move").addEventListener("click", () => _showMoveModal(file, "file"));
-  if (_canRenameItems()) tr.querySelector(".btn-rename").addEventListener("click", () => _showRenameModal(file, "file"));
-  if (_canDeleteItems()) tr.querySelector(".btn-delete").addEventListener("click", () => _showDeleteModal(file, "file"));
+  _wireItemActions(tr, file, "file", { displayName: fileName });
   return tr;
 }
 
@@ -1517,14 +1528,7 @@ function _makeFolderCard(folder) {
     <div class="card-name" title="${_esc(folder.name)}">${_esc(folder.displayName)}</div>
     <div class="card-meta">Folder</div>
     <div class="card-actions">
-      <button class="btn-action btn-props"    title="Properties">ℹ️</button>
-      <button class="btn-action btn-copy-url" title="Copy URL">🔗</button>
-      ${_canSas() ? `<button class="btn-action btn-sas" title="Generate SAS">🔑</button>` : ""}
-      ${CONFIG.app.allowDownload ? `<button class="btn-action btn-dl-folder" title="Download as ZIP">&#x2B07;</button>` : ""}
-      ${_canCopyItems() ? `<button class="btn-action btn-clone" title="Copy to…">📋</button>` : ""}
-      ${_canMoveItems() ? `<button class="btn-action btn-move" title="Move to…">📦</button>` : ""}
-      ${_canRenameItems() ? `<button class="btn-action btn-rename" title="Rename">✏️</button>` : ""}
-      ${_canDeleteItems() ? `<button class="btn-action btn-action-danger btn-delete" title="Delete">🗑️</button>` : ""}
+      ${_actionButtonsHtml("folder", folder.displayName, { compact: true })}
     </div>`;
   div.addEventListener("click", (e) => {
     if (e.target.closest(".btn-action") || e.target.closest(".card-chk")) return;
@@ -1533,20 +1537,8 @@ function _makeFolderCard(folder) {
   div.addEventListener("keydown", (e) => {
     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); _loadFiles(folder.name); }
   });
-  div.querySelector(".card-chk").addEventListener("change", (e) => {
-    e.stopPropagation();
-    if (e.target.checked) _selection.add(folder.name); else _selection.delete(folder.name);
-    div.classList.toggle("card-selected", e.target.checked);
-    _updateSelectionBar();
-  });
-  div.querySelector(".btn-props").addEventListener("click", (e) => { e.stopPropagation(); _showFolderProperties(folder); });
-  div.querySelector(".btn-copy-url").addEventListener("click", (e) => { e.stopPropagation(); _showCopyMenu(e.currentTarget, folder, "folder"); });
-  if (_canSas()) div.querySelector(".btn-sas").addEventListener("click", (e) => { e.stopPropagation(); _showSasModal(folder, true); });
-  if (CONFIG.app.allowDownload) div.querySelector(".btn-dl-folder").addEventListener("click", (e) => { e.stopPropagation(); _handleFolderDownload(folder); });
-  if (_canCopyItems()) div.querySelector(".btn-clone").addEventListener("click", (e) => { e.stopPropagation(); _showCopyModal(folder, "folder"); });
-  if (_canMoveItems()) div.querySelector(".btn-move").addEventListener("click", (e) => { e.stopPropagation(); _showMoveModal(folder, "folder"); });
-  if (_canRenameItems()) div.querySelector(".btn-rename").addEventListener("click", (e) => { e.stopPropagation(); _showRenameModal(folder, "folder"); });
-  if (_canDeleteItems()) div.querySelector(".btn-delete").addEventListener("click", (e) => { e.stopPropagation(); _showDeleteModal(folder, "folder"); });
+  _wireCardCheckbox(div, folder.name);
+  _wireItemActions(div, folder, "folder", { stopPropagation: true });
   return div;
 }
 
@@ -1561,33 +1553,10 @@ function _makeFileCard(file) {
     <div class="card-meta">${formatFileSize(file.size)}</div>
     <div class="card-meta card-date">${file.createdOn ? `Created ${formatDateShort(file.createdOn)}` : ""}</div>
     <div class="card-actions">
-      <button class="btn-action btn-props"    title="Properties">ℹ️</button>
-      <button class="btn-action btn-copy-url" title="Copy URL">🔗</button>
-      ${_canSas() ? `<button class="btn-action btn-sas" title="Generate SAS">🔑</button>` : ""}
-      ${_isViewable(file.displayName) ? `<button class="btn-action btn-view" title="View file">👁</button>` : ""}
-      ${_isViewable(file.displayName) && _canEditItems() ? `<button class="btn-action btn-edit" title="Edit file">📝</button>` : ""}
-      ${CONFIG.app.allowDownload ? `<button class="btn-action btn-dl" title="Download">&#x2B07;</button>` : ""}
-      ${_canCopyItems() ? `<button class="btn-action btn-clone" title="Copy to…">📋</button>` : ""}
-      ${_canMoveItems() ? `<button class="btn-action btn-move" title="Move to…">📦</button>` : ""}
-      ${_canRenameItems() ? `<button class="btn-action btn-rename" title="Rename">✏️</button>` : ""}
-      ${_canDeleteItems() ? `<button class="btn-action btn-action-danger btn-delete" title="Delete">🗑️</button>` : ""}
+      ${_actionButtonsHtml("file", file.displayName, { compact: true })}
     </div>`;
-  div.querySelector(".card-chk").addEventListener("change", (e) => {
-    e.stopPropagation();
-    if (e.target.checked) _selection.add(file.name); else _selection.delete(file.name);
-    div.classList.toggle("card-selected", e.target.checked);
-    _updateSelectionBar();
-  });
-  div.querySelector(".btn-props").addEventListener("click", (e) => { e.stopPropagation(); _showProperties(file); });
-  div.querySelector(".btn-copy-url").addEventListener("click", (e) => { e.stopPropagation(); _showCopyMenu(e.currentTarget, file, "file"); });
-  if (_canSas()) div.querySelector(".btn-sas").addEventListener("click", (e) => { e.stopPropagation(); _showSasModal(file, false); });
-  if (_isViewable(file.displayName)) div.querySelector(".btn-view").addEventListener("click", (e) => { e.stopPropagation(); _showViewModal(file); });
-  if (_isViewable(file.displayName) && _canEditItems()) div.querySelector(".btn-edit").addEventListener("click", (e) => { e.stopPropagation(); _showEditModal(file); });
-  if (CONFIG.app.allowDownload) div.querySelector(".btn-dl").addEventListener("click", (e) => { e.stopPropagation(); _handleDownload(file); });
-  if (_canCopyItems()) div.querySelector(".btn-clone").addEventListener("click", (e) => { e.stopPropagation(); _showCopyModal(file, "file"); });
-  if (_canMoveItems()) div.querySelector(".btn-move").addEventListener("click", (e) => { e.stopPropagation(); _showMoveModal(file, "file"); });
-  if (_canRenameItems()) div.querySelector(".btn-rename").addEventListener("click", (e) => { e.stopPropagation(); _showRenameModal(file, "file"); });
-  if (_canDeleteItems()) div.querySelector(".btn-delete").addEventListener("click", (e) => { e.stopPropagation(); _showDeleteModal(file, "file"); });
+  _wireCardCheckbox(div, file.name);
+  _wireItemActions(div, file, "file", { stopPropagation: true });
   return div;
 }
 
