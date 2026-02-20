@@ -617,8 +617,10 @@ async function copyBlobOnly(srcName, destName) {
  * @param {string} destName  Destination blob path
  */
 async function renameBlob(srcName, destName) {
-  await copyBlobOnly(srcName, destName);
-  await deleteBlob(srcName);
+  try { await copyBlobOnly(srcName, destName); }
+  catch (err) { throw new Error(`Rename (copy) failed: ${err.message}`); }
+  try { await deleteBlob(srcName); }
+  catch (err) { throw new Error(`Rename (delete source) failed: ${err.message}`); }
 }
 
 function _buildListUrl(accountName, containerName, prefix, marker) {
