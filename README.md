@@ -19,7 +19,7 @@ Authentication is handled natively using the **OAuth 2.0 Authorization Code Flow
 | 📦 Folder download | Download an entire folder (or the whole container) as a ZIP file |
 | ⬆️ Upload | Upload files and entire folders with per-file progress bars |
 | 🖱️ Drag & drop | Drop files onto the page to upload |
-| ✅ Overwrite toggle | Checkbox in the upload panel — skip files that already exist, or overwrite them |
+| ✅ Overwrite handling | Overwrite conflict modal when uploading files with existing names — choose to overwrite or skip conflicts |
 | ➕ New item | Create a new empty folder or a new blank file directly in the browser |
 | ✏️ Rename | Rename files and folders in-place (contributors only) |
 | 🗑️ Delete | Delete individual files or entire folder trees (contributors only) |
