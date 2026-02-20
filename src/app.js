@@ -1165,7 +1165,7 @@ function _actionButtonsHtml(type, displayName, { compact = false, extraHtml = ""
       <button class="btn-action btn-copy-url" title="Copy URL">${lbl("🔗", "Copy URL")}</button>
       ${_canSas() ? `<button class="btn-action btn-sas" title="Generate SAS">${lbl("🔑", "SAS")}</button>` : ""}
       ${!isFolder && _isViewable(displayName) ? `<button class="btn-action btn-view" title="View file">${lbl("👁", "View")}</button>` : ""}
-      ${!isFolder && _isViewable(displayName) && _canEditItems() ? `<button class="btn-action btn-edit" title="Edit file">${lbl("📝", "Edit")}</button>` : ""}
+      ${!isFolder && _isViewable(displayName) && !_isImageFile(displayName) && _canEditItems() ? `<button class="btn-action btn-edit" title="Edit file">${lbl("📝", "Edit")}</button>` : ""}
       ${isFolder && CONFIG.app.allowDownload ? `<button class="btn-action btn-dl-folder" title="Download as ZIP">${lbl("&#x2B07;", "Download")}</button>` : ""}
       ${!isFolder && CONFIG.app.allowDownload ? `<button class="btn-action btn-dl" title="Download">${lbl("&#x2B07;", "Download")}</button>` : ""}
       ${_canCopyItems() ? `<button class="btn-action btn-clone" title="Copy to…">${lbl("📋", "Copy")}</button>` : ""}
@@ -1205,8 +1205,8 @@ function _wireItemActions(el, item, type, { stopPropagation = false, displayName
   if (isFolder) {
     on(".btn-dl-folder", () => _handleFolderDownload(item));
   } else {
-    if (_isViewable(viewName))                    on(".btn-view", () => _showViewModal(item));
-    if (_isViewable(viewName) && _canEditItems()) on(".btn-edit", () => _showEditModal(item));
+    if (_isViewable(viewName))                                        on(".btn-view", () => _showViewModal(item));
+    if (_isViewable(viewName) && !_isImageFile(viewName) && _canEditItems()) on(".btn-edit", () => _showEditModal(item));
     on(".btn-dl", () => _handleDownload(item));
   }
   on(".btn-clone",  () => _showCopyModal(item, type));
@@ -1578,6 +1578,7 @@ const _VIEWABLE_EXTENSIONS = new Set([
 ]);
 
 function _isViewable(filename) {
+  if (_isImageFile(filename)) return true;
   const lower = filename.toLowerCase();
   // Match files with no extension that are known config files
   if (["dockerfile","makefile",".env",".gitignore",".gitattributes"].includes(lower)) return true;
@@ -1585,13 +1586,29 @@ function _isViewable(filename) {
   return _VIEWABLE_EXTENSIONS.has(ext);
 }
 
-const _MAX_VIEW_BYTES = 2 * 1024 * 1024; // 2 MB preview cap
+const _MAX_VIEW_BYTES = 2 * 1024 * 1024; // 2 MB preview cap (text)
+
+const _IMAGE_EXTENSIONS = new Set([
+  "jpg","jpeg","png","gif","svg","webp","bmp","ico","avif",
+]);
+
+const _MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10 MB image preview cap
+
+function _isImageFile(filename) {
+  const lower = filename.toLowerCase();
+  const dotIdx = lower.lastIndexOf(".");
+  if (dotIdx < 0) return false;
+  const ext = lower.slice(dotIdx + 1);
+  return _IMAGE_EXTENSIONS.has(ext);
+}
 
 async function _showViewModal(file) {
   const modal = _el("viewModal");
   const body  = _el("viewModalBody");
 
-  // Reset state
+  // Reset state — revoke any leftover blob URL from a previous preview
+  const prevImg = body.querySelector(".view-image-preview");
+  if (prevImg && prevImg.src.startsWith("blob:")) URL.revokeObjectURL(prevImg.src);
   body.innerHTML = `<div class="view-loading"><span class="view-spinner"></span> Loading…</div>`;
   _el("viewModalTitle").textContent = file.displayName;
   const ext = file.displayName.split(".").pop().toLowerCase();
@@ -1600,10 +1617,22 @@ async function _showViewModal(file) {
   _el("viewWrapBtn").classList.remove("active");
   modal.classList.remove("hidden");
 
+  const isImage = _isImageFile(file.displayName);
+
+  // Hide text-only controls for images
+  _el("viewWrapBtn").classList.toggle("hidden", isImage);
+  _el("viewCopyBtn").classList.toggle("hidden", isImage);
+
   let content = null;
   let wrapped  = false;
 
-  const close = () => { modal.classList.add("hidden"); body.innerHTML = ""; };
+  const close = () => {
+    modal.classList.add("hidden");
+    // Revoke any blob URL to free memory
+    const img = body.querySelector(".view-image-preview");
+    if (img && img.src.startsWith("blob:")) URL.revokeObjectURL(img.src);
+    body.innerHTML = "";
+  };
   _el("viewModalClose").onclick = close;
   _el("viewCloseBtn").onclick   = close;
   modal.onclick = (e) => { if (e.target === modal) close(); };
@@ -1619,7 +1648,8 @@ async function _showViewModal(file) {
 
     // Check size before reading body
     const cl = parseInt(res.headers.get("content-length") || "0", 10);
-    if (cl > _MAX_VIEW_BYTES) {
+    const maxBytes = isImage ? _MAX_IMAGE_BYTES : _MAX_VIEW_BYTES;
+    if (cl > maxBytes) {
       body.innerHTML = `<div class="view-too-large">
         <div style="font-size:32px">&#x26A0;&#xFE0F;</div>
         <p>File is too large to preview (${formatFileSize(cl)}).</p>
@@ -1629,19 +1659,35 @@ async function _showViewModal(file) {
       return;
     }
 
-    content = await res.text();
-    const lineCount = content.split("\n").length;
-    _el("viewFileMeta").textContent = `${lineCount.toLocaleString()} line${lineCount !== 1 ? "s" : ""} · ${formatFileSize(file.size)}`;
+    if (isImage) {
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const container = document.createElement("div");
+      container.className = "view-image-container";
+      const img = document.createElement("img");
+      img.className = "view-image-preview";
+      img.alt = file.displayName;
+      img.src = blobUrl;
+      container.appendChild(img);
+      body.innerHTML = "";
+      body.appendChild(container);
+      _el("viewFileMeta").textContent = formatFileSize(file.size || cl);
+    } else {
+      content = await res.text();
+      const lineCount = content.split("\n").length;
+      _el("viewFileMeta").textContent = `${lineCount.toLocaleString()} line${lineCount !== 1 ? "s" : ""} · ${formatFileSize(file.size)}`;
 
-    _renderViewContent(body, content, wrapped);
-
-    _el("viewWrapBtn").onclick = () => {
-      wrapped = !wrapped;
-      _el("viewWrapBtn").classList.toggle("active", wrapped);
       _renderViewContent(body, content, wrapped);
-    };
 
-    _el("viewCopyBtn").onclick = () => _copyToClipboard(content);
+      _el("viewWrapBtn").onclick = () => {
+        wrapped = !wrapped;
+        _el("viewWrapBtn").classList.toggle("active", wrapped);
+        _renderViewContent(body, content, wrapped);
+      };
+
+      _el("viewCopyBtn").onclick = () => _copyToClipboard(content);
+    }
+
     _el("viewDlBtn").classList.toggle("hidden", !CONFIG.app.allowDownload);
     _el("viewDlBtn").onclick = () => _handleDownload(file);
 
