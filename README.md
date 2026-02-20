@@ -355,13 +355,12 @@ For **folders**: the app lists all blobs under the source prefix and renames eac
 
 ## Upload: overwrite behaviour
 
-The upload panel has an **Overwrite existing files** checkbox:
+When you upload files, the app checks for name conflicts with existing blobs in the current folder.
 
-| Checkbox | Behaviour |
-|---|---|
-| ✅ Checked (default) | Files are uploaded regardless of whether they already exist — existing blobs are replaced. |
-| ☐ Unchecked | Before each upload the app sends a `HEAD` request to check whether the blob exists. Files that already exist are marked **Skipped** and no data is transferred. |
+If one or more selected files already exist, an **overwrite conflict** dialog appears with the following options:
 
+- **Overwrite all** — all conflicting blobs in this upload batch are replaced with the new content.
+- **Skip existing** — all conflicting blobs are left unchanged; only files that do not already exist are uploaded.
 ---
 
 ## Project files
