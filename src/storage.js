@@ -447,12 +447,25 @@ async function deleteBlob(blobName) {
 
 /**
  * Delete all blobs under a virtual folder prefix (recursive).
+ * Deletes files in parallel batches for performance on large folders.
  * @param {string} prefix  Folder path ending with "/"
  */
 async function deleteFolderContents(prefix) {
-  const { folders, files } = await listBlobsAtPrefix(prefix);
-  for (const file of files)   await deleteBlob(file.name);
-  for (const sub  of folders) await deleteFolderContents(sub.name);
+  // Recursively collect ALL blob names first (avoids interleaving list + delete)
+  async function collectAll(pfx) {
+    const { folders, files } = await listBlobsAtPrefix(pfx);
+    let names = files.map(f => f.name);
+    // Recurse subfolders in parallel
+    const sub = await Promise.all(folders.map(f => collectAll(f.name)));
+    for (const s of sub) names = names.concat(s);
+    return names;
+  }
+
+  const allNames = await collectAll(prefix);
+  const BATCH = 50;
+  for (let i = 0; i < allNames.length; i += BATCH) {
+    await Promise.all(allNames.slice(i, i + BATCH).map(n => deleteBlob(n)));
+  }
 }
 
 /**
@@ -465,31 +478,36 @@ async function deleteFolderContents(prefix) {
 async function downloadFolderAsZip(prefix, displayName, onProgress) {
   const { accountName, containerName } = CONFIG.storage;
 
-  // Recursively collect every blob name under this prefix
+  // Recursively collect every blob name under this prefix (parallel recursion)
   async function collectFiles(pfx) {
     const { folders, files } = await listBlobsAtPrefix(pfx);
     let names = files.map((f) => f.name);
-    for (const sub of folders) names = names.concat(await collectFiles(sub.name));
+    const sub = await Promise.all(folders.map(f => collectFiles(f.name)));
+    for (const s of sub) names = names.concat(s);
     return names;
   }
 
   const allNames = await collectFiles(prefix);
   if (allNames.length === 0) throw new Error("Folder is empty — nothing to download.");
 
-  // Fetch each blob and build ZIP entries
+  // Fetch blobs in parallel batches for speed
+  const FETCH_BATCH = 6;
   const entries = [];
-  for (let i = 0; i < allNames.length; i++) {
-    const authHeaders = await _storageAuthHeaders();
-    const name = allNames[i];
-    const url = _sasUrl(`https://${accountName}.blob.core.windows.net/${containerName}/${_encodePath(name)}`);
-    const res = await fetch(url, {
-      headers: authHeaders,
-    });
-    if (!res.ok) throw new Error(`Failed to fetch "${name}" (${res.status})`);
-    const data = new Uint8Array(await res.arrayBuffer());
-    const relativeName = name.startsWith(prefix) ? name.slice(prefix.length) : name;
-    entries.push({ name: relativeName, data });
-    if (typeof onProgress === "function") onProgress(i + 1, allNames.length);
+  let fetched = 0;
+  for (let i = 0; i < allNames.length; i += FETCH_BATCH) {
+    const batch = allNames.slice(i, i + FETCH_BATCH);
+    const results = await Promise.all(batch.map(async (name) => {
+      const authHeaders = await _storageAuthHeaders();
+      const url = _sasUrl(`https://${accountName}.blob.core.windows.net/${containerName}/${_encodePath(name)}`);
+      const res = await fetch(url, { headers: authHeaders });
+      if (!res.ok) throw new Error(`Failed to fetch "${name}" (${res.status})`);
+      const data = new Uint8Array(await res.arrayBuffer());
+      const relativeName = name.startsWith(prefix) ? name.slice(prefix.length) : name;
+      return { name: relativeName, data };
+    }));
+    entries.push(...results);
+    fetched += results.length;
+    if (typeof onProgress === "function") onProgress(fetched, allNames.length);
   }
 
   const zipBlob = _buildZip(entries);
@@ -762,12 +780,19 @@ function _buildZip(entries) {
   return new Blob([...localParts, ...centralDir, eocd], { type: "application/zip" });
 }
 
-/** CRC-32 checksum using the standard ZIP polynomial (0xEDB88320). */
+/** CRC-32 lookup table (pre-computed for the standard ZIP polynomial 0xEDB88320). */
+const _CRC32_TABLE = new Uint32Array(256);
+for (let n = 0; n < 256; n++) {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+  _CRC32_TABLE[n] = c;
+}
+
+/** CRC-32 checksum using a pre-computed lookup table (10-50× faster than bit-shifting per byte). */
 function _crc32(data) {
   let crc = 0xFFFFFFFF;
   for (let i = 0; i < data.length; i++) {
-    crc ^= data[i];
-    for (let j = 8; j--;) crc = (crc >>> 1) ^ (crc & 1 ? 0xEDB88320 : 0);
+    crc = _CRC32_TABLE[(crc ^ data[i]) & 0xFF] ^ (crc >>> 8);
   }
   return (crc ^ 0xFFFFFFFF) >>> 0;
 }
@@ -829,9 +854,8 @@ async function getFolderStats(prefix) {
     totalFolders += folders.length;
     totalFiles   += files.length;
     totalSize    += files.reduce((sum, f) => sum + (f.size || 0), 0);
-    for (const sub of folders) {
-      await recurse(sub.name);
-    }
+    // Recurse into all subfolders in parallel
+    await Promise.all(folders.map(sub => recurse(sub.name)));
   }
 
   await recurse(prefix);

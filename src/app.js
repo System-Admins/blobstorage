@@ -1648,12 +1648,11 @@ async function _showViewModal(file) {
 
   try {
     const { accountName, containerName } = CONFIG.storage;
-    const token = await getStorageToken();
-    const url   = `https://${accountName}.blob.core.windows.net/${containerName}/${_encodePath(file.name)}`;
+    const authHeaders = await _storageAuthHeaders();
+    const rawUrl = `https://${accountName}.blob.core.windows.net/${containerName}/${_encodePath(file.name)}`;
+    const url    = _sasUrl(rawUrl);
 
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}`, "x-ms-version": "2020-10-02" },
-    });
+    const res = await fetch(url, { headers: authHeaders });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
     // Check size before reading body
@@ -1728,11 +1727,10 @@ async function _showEditModal(file) {
 
   try {
     const { accountName, containerName } = CONFIG.storage;
-    const token = await getStorageToken();
-    const url   = `https://${accountName}.blob.core.windows.net/${containerName}/${_encodePath(file.name)}`;
-    const res   = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}`, "x-ms-version": "2020-10-02" },
-    });
+    const authHeaders = await _storageAuthHeaders();
+    const rawUrl = `https://${accountName}.blob.core.windows.net/${containerName}/${_encodePath(file.name)}`;
+    const url    = _sasUrl(rawUrl);
+    const res    = await fetch(url, { headers: authHeaders });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const cl = parseInt(res.headers.get("content-length") || "0", 10);
     if (cl > _MAX_VIEW_BYTES) throw new Error(`File too large to edit (${formatFileSize(cl)})`);
@@ -1830,7 +1828,6 @@ async function _exportReport() {
           "",
           "",
         ]);
-        await collect(folder.name);
       }
 
       for (const file of files) {
@@ -1854,6 +1851,9 @@ async function _exportReport() {
           file.md5         || "",
         ]);
       }
+
+      // Recurse into subfolders in parallel
+      await Promise.all(folders.map(folder => collect(folder.name)));
     }
 
     await collect(_currentPrefix);
@@ -2763,15 +2763,14 @@ async function _bulkDownload() {
   _showToast(`⏳ Building ZIP for ${_selection.size} item${_selection.size !== 1 ? "s" : ""}…`);
   try {
     const { accountName, containerName } = CONFIG.storage;
-    const token = await getStorageToken();
 
     // Recursively collect all blob names for a name (file or folder)
     async function collectNames(name) {
       if (name.endsWith("/")) {
-        // It's a folder — recurse
         const { folders, files } = await listBlobsAtPrefix(name);
         let names = files.map(f => f.name);
-        for (const sub of folders) names = names.concat(await collectNames(sub.name));
+        const sub = await Promise.all(folders.map(f => collectNames(f.name)));
+        for (const s of sub) names = names.concat(s);
         return names;
       }
       return [name];
@@ -2787,15 +2786,21 @@ async function _bulkDownload() {
     // Determine zip entry paths — strip common prefix if all items share one
     const stripPrefix = _currentPrefix;
 
+    // Fetch blobs in parallel batches for speed
+    const FETCH_BATCH = 6;
     const entries = [];
-    for (const name of allNames) {
-      const url = `https://${accountName}.blob.core.windows.net/${containerName}/${_encodePath(name)}`;
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}`, "x-ms-version": "2020-10-02" },
-      });
-      if (!res.ok) throw new Error(`Failed to fetch "${name}" (${res.status})`);
-      const data = new Uint8Array(await res.arrayBuffer());
-      entries.push({ name: name.startsWith(stripPrefix) ? name.slice(stripPrefix.length) : name, data });
+    for (let i = 0; i < allNames.length; i += FETCH_BATCH) {
+      const batch = allNames.slice(i, i + FETCH_BATCH);
+      const results = await Promise.all(batch.map(async (name) => {
+        const authHeaders = await _storageAuthHeaders();
+        const rawUrl = `https://${accountName}.blob.core.windows.net/${containerName}/${_encodePath(name)}`;
+        const url = _sasUrl(rawUrl);
+        const res = await fetch(url, { headers: authHeaders });
+        if (!res.ok) throw new Error(`Failed to fetch "${name}" (${res.status})`);
+        const data = new Uint8Array(await res.arrayBuffer());
+        return { name: name.startsWith(stripPrefix) ? name.slice(stripPrefix.length) : name, data };
+      }));
+      entries.push(...results);
     }
 
     const zipBlob = _buildZip(entries);
@@ -3235,7 +3240,7 @@ async function _processQueue(overwrite) {
     item.status = "uploading";
     _updateItemUI(item);
     try {
-      if (!overwrite && await blobExists(item.blobPath)) {
+      if (!overwrite && item.existed) {
         item.status = "skipped";
         item.error  = "File already exists (overwrite is off)";
       } else {
@@ -3680,10 +3685,12 @@ function _el(id) {
   return document.getElementById(id);
 }
 
+/** Reusable element for HTML-escaping (avoids creating a new element per call). */
+const _escDiv = document.createElement("div");
+
 function _esc(text) {
-  const d = document.createElement("div");
-  d.textContent = text;
-  return d.innerHTML;
+  _escDiv.textContent = text;
+  return _escDiv.innerHTML;
 }
 
 // ── SAS generator ────────────────────────────────────────────
