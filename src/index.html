@@ -84,15 +84,21 @@
         <span class="header-subtitle" id="storageInfo"></span>
       </div>
       <div class="header-right">
-        <span id="permBadge" class="perm-badge hidden"></span>
-        <div class="user-info" id="userInfo">
-          <span class="user-name" id="userDisplayName"></span>
-        </div>
         <button id="changeStorageBtn" class="btn btn-secondary" title="Switch storage account or container">🗄️ <span class="btn-label">Change</span></button>
         <button id="helpBtn" class="btn btn-secondary" title="Help">❓ <span class="btn-label">Help</span></button>
         <button id="signOutBtn" class="btn btn-secondary" title="Sign out">🚪 <span class="btn-label">Sign out</span></button>
       </div>
     </header>
+
+    <!-- Sub-header: user identity & permission badge -->
+    <div class="header-info-bar hidden" id="headerInfoBar">
+      <div class="header-info-bar-right">
+        <span id="permBadge" class="perm-badge hidden"></span>
+        <div class="user-info" id="userInfo">
+          <span class="user-name" id="userDisplayName"></span>
+        </div>
+      </div>
+    </div>
 
     <!-- App body: folder tree sidebar + content column -->
     <div class="app-body">
@@ -212,7 +218,7 @@
       </div><!-- /.app-content-col -->
     </div><!-- /.app-body -->
     <footer class="app-footer">
-      Developed by <a href="https://www.systemadmins.com" target="_blank" rel="noopener noreferrer">System Admins</a> &middot; &copy; <span id="footerYear"></span>
+      Developed by <a href="https://www.systemadmins.com" target="_blank" rel="noopener noreferrer">System Admins</a> &copy; <span id="footerYear"></span>
     </footer>
 
   </div><!-- /#mainApp -->

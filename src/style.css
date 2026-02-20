@@ -208,7 +208,7 @@ body {
   color: #721c24;
 }
 .open-sas-header-btn {
-  margin-right: 4px;
+  margin-right: 0;
 }
 
 /* ── SAS read-only download card ───────────────────────────── */
@@ -322,30 +322,45 @@ body {
   max-width: 300px;
 }
 
-.user-info {
-  min-width: 0;
-  max-width: 280px;
+/* ── Sub-header info bar (badge + user identity) ─────────── */
+.header-info-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 4px 24px;
+  background: linear-gradient(180deg, #e8f0fe 0%, #f4f7fb 100%);
+  border-bottom: 1px solid var(--border);
+  min-height: 28px;
+  position: sticky;
+  top: 56px;          /* sits right below the 56px header */
+  z-index: 99;
 }
-.user-name {
-  font-size: 13px;
-  font-weight: 500;
-  color: inherit;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
-}
+.header-info-bar-right { display: flex; align-items: center; gap: 10px; }
+
 /* ── Permission badge ─────────────────────────────────────── */
 .perm-badge {
   font-size: 11px;
   font-weight: 600;
   padding: 3px 9px;
   border-radius: 10px;
-  background: rgba(255,255,255,.18);
+  background: var(--azure-blue);
   color: #fff;
-  border: 1px solid rgba(255,255,255,.30);
   white-space: nowrap;
   letter-spacing: .02em;
+}
+
+.user-info {
+  min-width: 0;
+  max-width: 480px;
+}
+.user-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 /* ── Breadcrumb ───────────────────────────────────────────── */
@@ -872,6 +887,7 @@ body {
 @media (max-width: 768px) {
   .header                                       { padding: 0 16px; gap: 8px; }
   .header-right                                 { gap: 8px; }
+  .header-info-bar                              { padding: 4px 16px; }
   .breadcrumb-nav                               { padding: 6px 16px; }
   .toolbar                                      { padding: 6px 16px; }
   .content                                      { padding: 16px; }
@@ -891,7 +907,8 @@ body {
   .header-title                                 { font-size: 14px; }
   .header-subtitle                              { display: none; }
   .header-logo                                  { font-size: 18px; }
-  .user-info                                    { display: none; }
+  .header-info-bar                              { padding: 3px 10px; top: 48px; min-height: 24px; }
+  .header-info-bar .user-name                   { font-size: 11px; }
   .perm-badge,
   .sas-badge                                    { font-size: 10px; padding: 2px 6px; }
 

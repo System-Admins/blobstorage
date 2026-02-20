@@ -78,6 +78,7 @@ function _showSignInPage() {
   _el("signInPage").classList.remove("hidden");
   _el("mainApp").classList.add("hidden");
   _el("pickerPage").classList.add("hidden");
+  _el("headerInfoBar").classList.add("hidden");
   document.title = CONFIG.app.title;
 
   _el("signInBtn").addEventListener("click", async () => {
@@ -199,6 +200,7 @@ function _bootSasMode(info, state) {
   _el("signInPage").classList.add("hidden");
   _el("pickerPage").classList.add("hidden");
   _el("mainApp").classList.remove("hidden");
+  _el("headerInfoBar").classList.remove("hidden");
   document.title = CONFIG.app.title;
 
   // Header info
@@ -436,6 +438,7 @@ async function _showPickerPage(account) {
   _el("signInPage").classList.add("hidden");
   _el("mainApp").classList.add("hidden");
   _el("pickerPage").classList.remove("hidden");
+  _el("headerInfoBar").classList.add("hidden");
   document.title = "Select Storage — " + (CONFIG.app.title || "Azure Storage Explorer");
 
   // Populate user info in picker header
@@ -736,6 +739,7 @@ function _bootApp(account) {
   _el("signInPage").classList.add("hidden");
   _el("pickerPage").classList.add("hidden");
   _el("mainApp").classList.remove("hidden");
+  _el("headerInfoBar").classList.remove("hidden");
   document.title = CONFIG.app.title;
 
   // Header info
