@@ -13,7 +13,7 @@
                  object-src  'none';
                  base-uri    'self';" />
   <!-- X-Content-Type-Options must be set as an HTTP response header on your server/CDN, not as a meta tag -->
-  <title>Azure Storage Explorer</title>
+  <title>Blob Browser</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -28,7 +28,7 @@
   <div id="signInPage" class="sign-in-page hidden">
     <div class="sign-in-card">
       <div class="app-logo">☁️</div>
-      <h1>Azure Storage Explorer</h1>
+      <h1>Blob Browser</h1>
       <p>Sign in with your Microsoft account to browse your storage container.</p>
       <button id="signInBtn" class="btn btn-primary">
         Sign in with Microsoft
@@ -45,16 +45,22 @@
     <header class="picker-header">
       <div class="picker-header-left">
         <span class="header-logo">☁️</span>
-        <h1 class="header-title">Azure Storage Explorer</h1>
+        <h1 class="header-title">Blob Browser</h1>
       </div>
       <div class="picker-header-right">
-        <div class="user-info" id="pickerUserInfo">
-          <span class="user-name" id="pickerUserName"></span>
-        </div>
         <button id="pickerBackBtn" class="btn btn-secondary hidden" title="Return to current container">← Back to explorer</button>
         <button id="pickerSignOutBtn" class="btn btn-secondary" title="Sign out">🚪 <span class="btn-label">Sign out</span></button>
       </div>
     </header>
+
+    <!-- Sub-header: user identity (matches explorer page layout) -->
+    <div class="header-info-bar" id="pickerInfoBar">
+      <div class="header-info-bar-right">
+        <div class="user-info">
+          <span class="user-name" id="pickerInfoBarName"></span>
+        </div>
+      </div>
+    </div>
 
     <div class="picker-body">
       <div class="picker-title-row">
@@ -89,7 +95,7 @@
     <header class="header">
       <div class="header-left">
         <span class="header-logo">☁️</span>
-        <h1 class="header-title">Azure Storage Explorer</h1>
+        <h1 class="header-title">Blob Browser</h1>
         <span class="header-subtitle" id="storageInfo"></span>
       </div>
       <div class="header-right">
@@ -163,7 +169,7 @@
             </label>
             <label class="search-scope-opt">
               <input type="radio" name="searchScope" value="container" />
-              <span>Whole container</span>
+              <span>Everything</span>
             </label>
           </div>
         </div>
@@ -195,6 +201,8 @@
           <span id="selectionCount" class="selection-count"></span>
           <div class="selection-actions">
             <button id="selBulkDownloadBtn" class="btn btn-sel-action">&#x2B07; Download</button>
+            <button id="selBulkCopyBtn"     class="btn btn-sel-action">&#x1F4CB; Copy</button>
+            <button id="selBulkMoveBtn"     class="btn btn-sel-action">&#x1F4E6; Move</button>
             <button id="selBulkDeleteBtn"   class="btn btn-sel-action btn-sel-danger">&#x1F5D1;&#xFE0F; Delete</button>
             <button id="selClearBtn"        class="btn btn-sel-clear">&#x2715; Clear selection</button>
           </div>
@@ -263,6 +271,27 @@
     </div>
   </div>
 
+  <!-- ── Copy-to modal ──────────────────────────────── -->
+  <div id="copyModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="copyModalTitle">
+    <div class="modal" style="max-width:520px">
+      <div class="modal-header">
+        <h2 class="modal-title" id="copyModalTitle">Copy to…</h2>
+        <button class="modal-close" id="copyModalClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:13px;color:var(--text-muted);margin:0 0 10px">Select a destination folder, then click <strong>Copy</strong>.</p>
+        <div id="copyTreeContainer" class="copy-tree-container"></div>
+        <label class="rename-label" for="copyDestInput" style="margin-top:12px">Destination path</label>
+        <input type="text" id="copyDestInput" class="rename-input" spellcheck="false" placeholder="folder/subfolder/" />
+        <p class="rename-error hidden" id="copyError"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary-neutral" id="copyCancelBtn">Cancel</button>
+        <button class="btn btn-primary-sm"        id="copyConfirmBtn">📋 Copy</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Delete confirmation modal ─────────────────────────── -->
   <div id="deleteModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="deleteModalTitle">
     <div class="modal">
@@ -294,6 +323,24 @@
         <button class="btn btn-secondary-neutral" id="overwriteCancelBtn">Cancel</button>
         <button class="btn btn-secondary-neutral" id="overwriteSkipBtn">Skip existing</button>
         <button class="btn btn-primary-sm"        id="overwriteConfirmBtn">Overwrite all</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Copy/Move conflict prompt ─────────────────────────── -->
+  <div id="copyConflictModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="copyConflictTitle">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title" id="copyConflictTitle">⚠️ Destination already exists</h2>
+        <button class="modal-close" id="copyConflictClose" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <p id="copyConflictMsg" style="font-size:14px;line-height:1.6;"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary-neutral" id="copyConflictSkipBtn">Skip</button>
+        <button class="btn btn-primary-sm"        id="copyConflictOverwriteBtn">Overwrite</button>
+        <button class="btn btn-primary-sm"        id="copyConflictOverwriteAllBtn">Overwrite all</button>
       </div>
     </div>
   </div>
@@ -451,7 +498,7 @@
 
         <div class="help-section">
           <h3 class="help-heading">📋 Overview</h3>
-          <p>Azure Storage Explorer lets you browse, download, upload, and manage files stored in an Azure Blob Storage container — directly from your browser, without any additional software.</p>
+          <p>Blob Browser lets you browse, download, upload, and manage files stored in an Azure Blob Storage container — directly from your browser, without any additional software.</p>
         </div>
 
         <div class="help-section">
@@ -517,7 +564,7 @@
           <ul class="help-list">
             <li>Click the <strong>🔍 Search</strong> toolbar button to open the search bar.</li>
             <li><strong>Current folder</strong> — filters the files and folders visible in the current location.</li>
-            <li><strong>Whole container</strong> — searches every file name across the entire container.</li>
+            <li><strong>Everything</strong> — searches every file and folder name across the entire container.</li>
           </ul>
         </div>
 

@@ -15,7 +15,7 @@ let _sortKey                = "name"; // "name" | "size" | "modified" | "created
 let _sortDir                = "asc";  // "asc" | "desc"
 let _cachedFolders          = [];     // raw folders from last _loadFiles call
 let _cachedFiles            = [];     // raw files from last _loadFiles call
-let _containerSearchResults = null;   // null = normal view; array = container-wide search hits
+let _containerSearchResults = null;   // null = normal view; { files, folders } = container-wide search hits
 let _searchDebounceTimer    = null;
 
 // sessionStorage key for persisting the user's storage selection
@@ -25,6 +25,8 @@ const _STORAGE_SELECTION_KEY = "be_storage_selection";
 function _canRenameItems() { return _canUpload && (CONFIG.app.allowRename !== false); }
 function _canDeleteItems() { return _canUpload && (CONFIG.app.allowDelete !== false); }
 function _canSas()         { return !isSasMode() && _canUpload && CONFIG.app.allowSas !== false; }
+function _canCopyItems()   { return _canUpload; }
+function _canMoveItems()   { return _canUpload; }
 function _canEditItems()   { return _canUpload; }
 function _canEmail()       { return !isSasMode() && CONFIG.app.allowEmail !== false && !!getUser(); }
 
@@ -439,12 +441,12 @@ async function _showPickerPage(account) {
   _el("mainApp").classList.add("hidden");
   _el("pickerPage").classList.remove("hidden");
   _el("headerInfoBar").classList.add("hidden");
-  document.title = "Select Storage — " + (CONFIG.app.title || "Azure Storage Explorer");
+  document.title = "Select Storage — " + (CONFIG.app.title || "Blob Browser");
 
-  // Populate user info in picker header
+  // Populate user info in picker sub-header info bar
   const displayName = account.name || account.username;
   const upn          = account.username;
-  _el("pickerUserName").textContent = upn ? `${displayName} (${upn})` : displayName;
+  _el("pickerInfoBarName").textContent = upn ? `${displayName} (${upn})` : displayName;
   _el("pickerSignOutBtn").onclick = () => signOut();
   _el("pickerOriginHint").textContent = window.location.origin;
 
@@ -456,6 +458,7 @@ async function _showPickerPage(account) {
   backBtn.onclick = hasActiveSession ? () => {
     _el("pickerPage").classList.add("hidden");
     _el("mainApp").classList.remove("hidden");
+    _el("headerInfoBar").classList.remove("hidden");
   } : null;
 
   const subList  = _el("pickerSubList");
@@ -1031,23 +1034,27 @@ function _applyAndRender() {
   // ── Container-wide search results ──────────────────────────
   if (_containerSearchResults !== null) {
     const term = (_el("searchInput")?.value || "").trim();
-    const { files: sortedFiles } = _sortItems([], _containerSearchResults);
+    const { folders: sortedFolders, files: sortedFiles } = _sortItems(
+      _containerSearchResults.folders,
+      _containerSearchResults.files
+    );
+    const totalCount = sortedFolders.length + sortedFiles.length;
     banner.classList.remove("hidden");
     banner.innerHTML =
-      `\uD83D\uDD0D <strong>${sortedFiles.length}</strong> result${sortedFiles.length !== 1 ? "s" : ""} `
+      `\uD83D\uDD0D <strong>${totalCount}</strong> result${totalCount !== 1 ? "s" : ""} `
       + `for \u201c<strong>${_esc(term)}</strong>\u201d across the entire container`;
-    countLabel.textContent = `${sortedFiles.length} result${sortedFiles.length !== 1 ? "s" : ""}`;
+    countLabel.textContent = `${totalCount} result${totalCount !== 1 ? "s" : ""}`;
 
-    if (sortedFiles.length === 0) {
+    if (totalCount === 0) {
       emptyState.classList.remove("hidden");
-      emptyState.querySelector("p").textContent = `No files found matching \u201c${term}\u201d`;
+      emptyState.querySelector("p").textContent = `No results found matching \u201c${term}\u201d`;
       return;
     }
     emptyState.classList.add("hidden");
     if (_viewMode === "list") {
-      _renderSearchResultsListView(container, sortedFiles);
+      _renderSearchResultsListView(container, sortedFolders, sortedFiles);
     } else {
-      _renderGridView(container, [], sortedFiles);
+      _renderGridView(container, sortedFolders, sortedFiles);
     }
     return;
   }
@@ -1127,7 +1134,7 @@ function _onSearchInput() {
     _el("searchBanner").classList.add("hidden");
     _applyAndRender();
   } else {
-    // Whole-container: debounce 500 ms before hitting the API
+    // "Everything" search: debounce 500 ms before hitting the API
     _searchDebounceTimer = setTimeout(() => _doContainerSearch(term), 500);
   }
 }
@@ -1250,6 +1257,8 @@ function _makeFolderRow(folder) {
         <button class="btn-action btn-copy-url" title="Copy URL">🔗 Copy URL</button>
         ${_canSas() ? `<button class="btn-action btn-sas" title="Generate SAS">🔑 SAS</button>` : ""}
         ${CONFIG.app.allowDownload ? `<button class="btn-action btn-dl-folder" title="Download as ZIP">&#x2B07; Download</button>` : ""}
+        ${_canCopyItems() ? `<button class="btn-action btn-clone" title="Copy to…">📋 Copy</button>` : ""}
+        ${_canMoveItems() ? `<button class="btn-action btn-move" title="Move to…">📦 Move</button>` : ""}
         ${_canRenameItems() ? `<button class="btn-action btn-rename" title="Rename">✏️ Rename</button>` : ""}
         ${_canDeleteItems() ? `<button class="btn-action btn-action-danger btn-delete" title="Delete">🗑️ Delete</button>` : ""}
       </div>
@@ -1267,6 +1276,8 @@ function _makeFolderRow(folder) {
   tr.querySelector(".btn-copy-url").addEventListener("click", (e) => _showCopyMenu(e.currentTarget, folder, "folder"));
   if (_canSas()) tr.querySelector(".btn-sas").addEventListener("click", () => _showSasModal(folder, true));
   if (CONFIG.app.allowDownload) tr.querySelector(".btn-dl-folder").addEventListener("click", () => _handleFolderDownload(folder));
+  if (_canCopyItems()) tr.querySelector(".btn-clone").addEventListener("click", () => _showCopyModal(folder, "folder"));
+  if (_canMoveItems()) tr.querySelector(".btn-move").addEventListener("click", () => _showMoveModal(folder, "folder"));
   if (_canRenameItems()) tr.querySelector(".btn-rename").addEventListener("click", () => _showRenameModal(folder, "folder"));
   if (_canDeleteItems()) tr.querySelector(".btn-delete").addEventListener("click", () => _showDeleteModal(folder, "folder"));
   return tr;
@@ -1307,6 +1318,8 @@ function _makeFileRow(file) {
         ${_isViewable(file.displayName) ? `<button class="btn-action btn-view" title="View file">👁 View</button>` : ""}
         ${_isViewable(file.displayName) && _canEditItems() ? `<button class="btn-action btn-edit" title="Edit file">📝 Edit</button>` : ""}
         ${CONFIG.app.allowDownload ? `<button class="btn-action btn-dl" title="Download">&#x2B07; Download</button>` : ""}
+        ${_canCopyItems() ? `<button class="btn-action btn-clone" title="Copy to…">📋 Copy</button>` : ""}
+        ${_canMoveItems() ? `<button class="btn-action btn-move" title="Move to…">📦 Move</button>` : ""}
         ${_canRenameItems() ? `<button class="btn-action btn-rename" title="Rename">✏️ Rename</button>` : ""}
         ${_canDeleteItems() ? `<button class="btn-action btn-action-danger btn-delete" title="Delete">🗑️ Delete</button>` : ""}
       </div>
@@ -1322,6 +1335,8 @@ function _makeFileRow(file) {
   if (_isViewable(file.displayName)) tr.querySelector(".btn-view").addEventListener("click", () => _showViewModal(file));
   if (_isViewable(file.displayName) && _canEditItems()) tr.querySelector(".btn-edit").addEventListener("click", () => _showEditModal(file));
   if (CONFIG.app.allowDownload) tr.querySelector(".btn-dl").addEventListener("click", () => _handleDownload(file));
+  if (_canCopyItems()) tr.querySelector(".btn-clone").addEventListener("click", () => _showCopyModal(file, "file"));
+  if (_canMoveItems()) tr.querySelector(".btn-move").addEventListener("click", () => _showMoveModal(file, "file"));
   if (_canRenameItems()) tr.querySelector(".btn-rename").addEventListener("click", () => _showRenameModal(file, "file"));
   if (_canDeleteItems()) tr.querySelector(".btn-delete").addEventListener("click", () => _showDeleteModal(file, "file"));
   return tr;
@@ -1330,7 +1345,7 @@ function _makeFileRow(file) {
 // ── Search-results list view ──────────────────────────────────
 
 /** List view for whole-container search results (flat rows, full blob paths). */
-function _renderSearchResultsListView(container, files) {
+function _renderSearchResultsListView(container, folders, files) {
   const table = document.createElement("table");
   table.className = "file-table";
 
@@ -1350,6 +1365,7 @@ function _renderSearchResultsListView(container, files) {
   );
 
   const tbody = document.createElement("tbody");
+  folders.forEach((f) => tbody.appendChild(_makeSearchFolderRow(f)));
   files.forEach((f) => tbody.appendChild(_makeSearchResultRow(f)));
   table.appendChild(tbody);
   container.appendChild(table);
@@ -1364,6 +1380,61 @@ function _renderSearchResultsListView(container, files) {
     });
     _updateSelectionBar();
   });
+}
+
+/** Build a table row for a folder found in the whole-container search. */
+function _makeSearchFolderRow(folder) {
+  const parentPrefix = folder.name.slice(0, folder.name.slice(0, -1).lastIndexOf("/") + 1);
+
+  const tr = document.createElement("tr");
+  tr.className = "file-row folder-row search-result-row";
+  if (_selection.has(folder.name)) tr.classList.add("row-selected");
+  tr.innerHTML = `
+    <td class="col-check"><input type="checkbox" class="row-chk" data-name="${_esc(folder.name)}" ${_selection.has(folder.name) ? "checked" : ""} /></td>
+    <td>
+      <div class="file-name">
+        <span class="file-icon">📁</span>
+        <div class="search-result-name">
+          <a href="#" class="file-link search-result-file">${_esc(folder.displayName)}</a>
+          ${parentPrefix ? `<span class="search-result-path">${_esc(parentPrefix)}</span>` : ""}
+        </div>
+      </div>
+    </td>
+    <td class="file-size">—</td>
+    <td class="file-date">—</td>
+    <td class="file-date">—</td>
+    <td class="file-actions">
+      <div class="row-actions">
+        <button class="btn-action btn-props"    title="Properties">ℹ️ Info</button>
+        <button class="btn-action btn-copy-url" title="Copy URL">🔗 Copy URL</button>
+        ${_canSas() ? `<button class="btn-action btn-sas" title="Generate SAS">🔑 SAS</button>` : ""}
+        ${CONFIG.app.allowDownload ? `<button class="btn-action btn-dl-folder" title="Download as ZIP">&#x2B07; Download</button>` : ""}
+        ${_canCopyItems() ? `<button class="btn-action btn-clone" title="Copy to…">📋 Copy</button>` : ""}
+        ${_canMoveItems() ? `<button class="btn-action btn-move" title="Move to…">📦 Move</button>` : ""}
+        ${_canRenameItems() ? `<button class="btn-action btn-rename" title="Rename">✏️ Rename</button>` : ""}
+        ${_canDeleteItems() ? `<button class="btn-action btn-action-danger btn-delete" title="Delete">🗑️ Delete</button>` : ""}
+      </div>
+    </td>`;
+
+  tr.querySelector(".file-link").addEventListener("click", (e) => {
+    e.preventDefault();
+    _clearSearch();
+    _loadFiles(folder.name);
+  });
+  tr.querySelector(".row-chk").addEventListener("change", (e) => {
+    if (e.target.checked) _selection.add(folder.name); else _selection.delete(folder.name);
+    tr.classList.toggle("row-selected", e.target.checked);
+    _updateSelectionBar();
+  });
+  tr.querySelector(".btn-props").addEventListener("click", () => _showFolderProperties(folder));
+  tr.querySelector(".btn-copy-url").addEventListener("click", (e) => _showCopyMenu(e.currentTarget, folder, "folder"));
+  if (_canSas()) tr.querySelector(".btn-sas").addEventListener("click", () => _showSasModal(folder, true));
+  if (CONFIG.app.allowDownload) tr.querySelector(".btn-dl-folder").addEventListener("click", () => _handleFolderDownload(folder));
+  if (_canCopyItems()) tr.querySelector(".btn-clone").addEventListener("click", () => _showCopyModal(folder, "folder"));
+  if (_canMoveItems()) tr.querySelector(".btn-move").addEventListener("click", () => _showMoveModal(folder, "folder"));
+  if (_canRenameItems()) tr.querySelector(".btn-rename").addEventListener("click", () => _showRenameModal(folder, "folder"));
+  if (_canDeleteItems()) tr.querySelector(".btn-delete").addEventListener("click", () => _showDeleteModal(folder, "folder"));
+  return tr;
 }
 
 /** Build a table row for a single whole-container search result. */
@@ -1399,6 +1470,8 @@ function _makeSearchResultRow(file) {
         ${_isViewable(fileName) ? `<button class="btn-action btn-view" title="View file">👁 View</button>` : ""}
         ${_isViewable(fileName) && _canEditItems() ? `<button class="btn-action btn-edit" title="Edit file">📝 Edit</button>` : ""}
         ${CONFIG.app.allowDownload ? `<button class="btn-action btn-dl" title="Download">&#x2B07; Download</button>` : ""}
+        ${_canCopyItems() ? `<button class="btn-action btn-clone" title="Copy to…">📋 Copy</button>` : ""}
+        ${_canMoveItems() ? `<button class="btn-action btn-move" title="Move to…">📦 Move</button>` : ""}
         ${_canRenameItems() ? `<button class="btn-action btn-rename" title="Rename">✏️ Rename</button>` : ""}
         ${_canDeleteItems() ? `<button class="btn-action btn-action-danger btn-delete" title="Delete">🗑️ Delete</button>` : ""}
       </div>
@@ -1421,6 +1494,8 @@ function _makeSearchResultRow(file) {
   if (_isViewable(fileName)) tr.querySelector(".btn-view").addEventListener("click", () => _showViewModal(file));
   if (_isViewable(fileName) && _canEditItems()) tr.querySelector(".btn-edit").addEventListener("click", () => _showEditModal(file));
   if (CONFIG.app.allowDownload) tr.querySelector(".btn-dl").addEventListener("click", () => _handleDownload(file));
+  if (_canCopyItems()) tr.querySelector(".btn-clone").addEventListener("click", () => _showCopyModal(file, "file"));
+  if (_canMoveItems()) tr.querySelector(".btn-move").addEventListener("click", () => _showMoveModal(file, "file"));
   if (_canRenameItems()) tr.querySelector(".btn-rename").addEventListener("click", () => _showRenameModal(file, "file"));
   if (_canDeleteItems()) tr.querySelector(".btn-delete").addEventListener("click", () => _showDeleteModal(file, "file"));
   return tr;
@@ -1453,6 +1528,8 @@ function _makeFolderCard(folder) {
       <button class="btn-action btn-copy-url" title="Copy URL">🔗</button>
       ${_canSas() ? `<button class="btn-action btn-sas" title="Generate SAS">🔑</button>` : ""}
       ${CONFIG.app.allowDownload ? `<button class="btn-action btn-dl-folder" title="Download as ZIP">&#x2B07;</button>` : ""}
+      ${_canCopyItems() ? `<button class="btn-action btn-clone" title="Copy to…">📋</button>` : ""}
+      ${_canMoveItems() ? `<button class="btn-action btn-move" title="Move to…">📦</button>` : ""}
       ${_canRenameItems() ? `<button class="btn-action btn-rename" title="Rename">✏️</button>` : ""}
       ${_canDeleteItems() ? `<button class="btn-action btn-action-danger btn-delete" title="Delete">🗑️</button>` : ""}
     </div>`;
@@ -1473,6 +1550,8 @@ function _makeFolderCard(folder) {
   div.querySelector(".btn-copy-url").addEventListener("click", (e) => { e.stopPropagation(); _showCopyMenu(e.currentTarget, folder, "folder"); });
   if (_canSas()) div.querySelector(".btn-sas").addEventListener("click", (e) => { e.stopPropagation(); _showSasModal(folder, true); });
   if (CONFIG.app.allowDownload) div.querySelector(".btn-dl-folder").addEventListener("click", (e) => { e.stopPropagation(); _handleFolderDownload(folder); });
+  if (_canCopyItems()) div.querySelector(".btn-clone").addEventListener("click", (e) => { e.stopPropagation(); _showCopyModal(folder, "folder"); });
+  if (_canMoveItems()) div.querySelector(".btn-move").addEventListener("click", (e) => { e.stopPropagation(); _showMoveModal(folder, "folder"); });
   if (_canRenameItems()) div.querySelector(".btn-rename").addEventListener("click", (e) => { e.stopPropagation(); _showRenameModal(folder, "folder"); });
   if (_canDeleteItems()) div.querySelector(".btn-delete").addEventListener("click", (e) => { e.stopPropagation(); _showDeleteModal(folder, "folder"); });
   return div;
@@ -1495,6 +1574,8 @@ function _makeFileCard(file) {
       ${_isViewable(file.displayName) ? `<button class="btn-action btn-view" title="View file">👁</button>` : ""}
       ${_isViewable(file.displayName) && _canEditItems() ? `<button class="btn-action btn-edit" title="Edit file">📝</button>` : ""}
       ${CONFIG.app.allowDownload ? `<button class="btn-action btn-dl" title="Download">&#x2B07;</button>` : ""}
+      ${_canCopyItems() ? `<button class="btn-action btn-clone" title="Copy to…">📋</button>` : ""}
+      ${_canMoveItems() ? `<button class="btn-action btn-move" title="Move to…">📦</button>` : ""}
       ${_canRenameItems() ? `<button class="btn-action btn-rename" title="Rename">✏️</button>` : ""}
       ${_canDeleteItems() ? `<button class="btn-action btn-action-danger btn-delete" title="Delete">🗑️</button>` : ""}
     </div>`;
@@ -1510,6 +1591,8 @@ function _makeFileCard(file) {
   if (_isViewable(file.displayName)) div.querySelector(".btn-view").addEventListener("click", (e) => { e.stopPropagation(); _showViewModal(file); });
   if (_isViewable(file.displayName) && _canEditItems()) div.querySelector(".btn-edit").addEventListener("click", (e) => { e.stopPropagation(); _showEditModal(file); });
   if (CONFIG.app.allowDownload) div.querySelector(".btn-dl").addEventListener("click", (e) => { e.stopPropagation(); _handleDownload(file); });
+  if (_canCopyItems()) div.querySelector(".btn-clone").addEventListener("click", (e) => { e.stopPropagation(); _showCopyModal(file, "file"); });
+  if (_canMoveItems()) div.querySelector(".btn-move").addEventListener("click", (e) => { e.stopPropagation(); _showMoveModal(file, "file"); });
   if (_canRenameItems()) div.querySelector(".btn-rename").addEventListener("click", (e) => { e.stopPropagation(); _showRenameModal(file, "file"); });
   if (_canDeleteItems()) div.querySelector(".btn-delete").addEventListener("click", (e) => { e.stopPropagation(); _showDeleteModal(file, "file"); });
   return div;
@@ -2296,6 +2379,349 @@ function _showRenameModal(item, type) {
   input.onkeydown = (e) => { if (e.key === "Enter") doRename(); if (e.key === "Escape") close(); };
 }
 
+// ── Copy / Move modal ────────────────────────────────────────────
+
+function _showCopyModal(item, type) { _showCopyMoveModal(item, type, "copy"); }
+function _showMoveModal(item, type) { _showCopyMoveModal(item, type, "move"); }
+
+/**
+ * Generic modal that lets the user pick a destination folder and then
+ * copies or moves one or more items there.
+ * @param {object|null}    item   Single item (or null for bulk mode)
+ * @param {string}         type   "file" | "folder" | "bulk"
+ * @param {"copy"|"move"}  mode
+ */
+function _showCopyMoveModal(item, type, mode) {
+  const isMove = mode === "move";
+  const verb   = isMove ? "Move" : "Copy";
+  const icon   = isMove ? "📦" : "📋";
+
+  const modal      = _el("copyModal");
+  const treeEl     = _el("copyTreeContainer");
+  const destInput  = _el("copyDestInput");
+  const errEl      = _el("copyError");
+  const closeBtn   = _el("copyModalClose");
+  const cancelBtn  = _el("copyCancelBtn");
+  const confirmBtn = _el("copyConfirmBtn");
+
+  // Title
+  if (type === "bulk") {
+    _el("copyModalTitle").textContent = `${verb} ${_selection.size} item${_selection.size !== 1 ? "s" : ""} to…`;
+  } else {
+    const label = type === "folder" ? "folder" : "file";
+    _el("copyModalTitle").textContent = `${verb} ${label} — ${item.displayName}`;
+  }
+  destInput.value = "";
+  errEl.textContent = "";
+  errEl.classList.add("hidden");
+  treeEl.innerHTML = "";
+  confirmBtn.textContent = `${icon} ${verb}`;
+  modal.classList.remove("hidden");
+
+  // ── Build a mini folder-picker tree ──────────────────────────
+  const containerName = CONFIG.storage.containerName;
+  let _selectedPrefix = "";
+
+  function selectPrefix(prefix, row) {
+    _selectedPrefix = prefix;
+    destInput.value = prefix;
+    treeEl.querySelectorAll(".copy-tree-active").forEach(r => r.classList.remove("copy-tree-active"));
+    if (row) row.classList.add("copy-tree-active");
+  }
+
+  function makeNode(displayName, prefix) {
+    const node = document.createElement("div");
+    node.className = "copy-tree-node";
+    node.dataset.prefix = prefix;
+
+    const row = document.createElement("div");
+    row.className = "copy-tree-row";
+
+    const chevron = document.createElement("button");
+    chevron.type = "button";
+    chevron.className = "copy-tree-chevron";
+    chevron.innerHTML = "&#9654;";
+
+    const icon = document.createElement("span");
+    icon.textContent = prefix === "" ? "📦" : "📁";
+
+    const lbl = document.createElement("span");
+    lbl.textContent = displayName;
+
+    row.appendChild(chevron);
+    row.appendChild(icon);
+    row.appendChild(lbl);
+
+    const childrenEl = document.createElement("div");
+    childrenEl.className = "copy-tree-children";
+
+    node.appendChild(row);
+    node.appendChild(childrenEl);
+
+    let loaded = false;
+
+    async function ensureLoaded() {
+      if (loaded) return;
+      loaded = true;
+      childrenEl.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:2px 6px">Loading…</div>';
+      try {
+        const { folders } = await listBlobsAtPrefix(prefix);
+        childrenEl.innerHTML = "";
+        if (folders.length === 0) {
+          chevron.style.visibility = "hidden";
+        } else {
+          for (const f of folders) childrenEl.appendChild(makeNode(f.displayName, f.name));
+        }
+      } catch {
+        childrenEl.innerHTML = '<div style="font-size:12px;color:var(--error);padding:2px 6px">Failed</div>';
+      }
+    }
+
+    chevron.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const expanding = !node.classList.contains("ct-expanded");
+      node.classList.toggle("ct-expanded");
+      if (expanding) await ensureLoaded();
+    });
+
+    row.addEventListener("click", async () => {
+      selectPrefix(prefix, row);
+      if (!node.classList.contains("ct-expanded")) {
+        node.classList.add("ct-expanded");
+        await ensureLoaded();
+      }
+    });
+
+    return node;
+  }
+
+  // Root node
+  const root = makeNode(containerName, "");
+  root.classList.add("ct-expanded");
+  treeEl.appendChild(root);
+  // Eagerly load root children
+  (async () => {
+    const rootChildren = root.querySelector(".copy-tree-children");
+    rootChildren.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:2px 6px">Loading…</div>';
+    try {
+      const { folders } = await listBlobsAtPrefix("");
+      rootChildren.innerHTML = "";
+      for (const f of folders) rootChildren.appendChild(makeNode(f.displayName, f.name));
+    } catch {
+      rootChildren.innerHTML = '<div style="font-size:12px;color:var(--error);padding:2px 6px">Failed</div>';
+    }
+    // Mark root loaded
+    root._loaded = true;
+  })();
+
+  // Select root by default
+  selectPrefix("", root.querySelector(".copy-tree-row"));
+
+  const close = () => modal.classList.add("hidden");
+
+  // Helper — prompt the user about a single conflict, returns "skip" | "overwrite" | "overwriteAll"
+  function _promptCopyConflict(displayName, destPath, itemType) {
+    return new Promise((resolve) => {
+      const cfModal   = _el("copyConflictModal");
+      const msgEl     = _el("copyConflictMsg");
+      const closeBtn  = _el("copyConflictClose");
+      const skipBtn   = _el("copyConflictSkipBtn");
+      const owBtn     = _el("copyConflictOverwriteBtn");
+      const owAllBtn  = _el("copyConflictOverwriteAllBtn");
+
+      const kind = itemType === "folder" ? "folder" : "file";
+      msgEl.innerHTML =
+        `The ${kind} <strong>${_esc(displayName)}</strong> already exists at ` +
+        `<strong>${_esc(destPath || "/")}</strong>.<br>Do you want to overwrite it?`;
+      cfModal.classList.remove("hidden");
+
+      const done = (result) => { cfModal.classList.add("hidden"); resolve(result); };
+      skipBtn.onclick   = () => done("skip");
+      owBtn.onclick     = () => done("overwrite");
+      owAllBtn.onclick  = () => done("overwriteAll");
+      closeBtn.onclick  = () => done("skip");
+      cfModal.onclick   = (e) => { if (e.target === cfModal) done("skip"); };
+    });
+  }
+
+  // Track overwrite-all state across the current operation
+  let _overwriteAll = false;
+
+  // Helper — check if destination exists, prompt if needed. Returns true to proceed, false to skip.
+  async function _shouldProceed(displayName, destBlobOrPrefix, normDest, itemType) {
+    if (_overwriteAll) return true;
+
+    let exists = false;
+    if (itemType === "folder") {
+      // Check if destination folder has any content
+      const { folders, files } = await listBlobsAtPrefix(normDest + displayName + "/");
+      exists = folders.length > 0 || files.length > 0;
+    } else {
+      exists = await blobExists(destBlobOrPrefix);
+    }
+
+    if (!exists) return true;
+
+    const result = await _promptCopyConflict(displayName, normDest, itemType);
+    if (result === "overwriteAll") { _overwriteAll = true; return true; }
+    if (result === "overwrite")    return true;
+    return false; // "skip"
+  }
+
+  // Helper — recursively collect all blobs under a folder prefix
+  async function _collectAll(prefix) {
+    const { folders, files } = await listBlobsAtPrefix(prefix);
+    let blobs = files.map(f => f.name);
+    for (const sub of folders) blobs = blobs.concat(await _collectAll(sub.name));
+    return blobs;
+  }
+
+  // Helper — copy (and optionally delete) a single item
+  async function _processItem(srcItem, srcType, normDest) {
+    if (srcType === "folder") {
+      const allBlobs = await _collectAll(srcItem.name);
+      if (allBlobs.length === 0) {
+        const placeholder = new File([""], ".keep", { type: "application/octet-stream" });
+        await uploadBlob(normDest + srcItem.displayName + "/.keep", placeholder, null, {});
+      } else {
+        const MAX = 5000;
+        if (allBlobs.length > MAX) throw new Error(`Folder "${srcItem.displayName}" too large (${allBlobs.length} items).`);
+        const BATCH = 100;
+        for (let i = 0; i < allBlobs.length; i += BATCH) {
+          await Promise.all(allBlobs.slice(i, i + BATCH).map(blob => {
+            const rel  = blob.slice(srcItem.name.length);
+            return copyBlobOnly(blob, normDest + srcItem.displayName + "/" + rel);
+          }));
+          if (i + BATCH < allBlobs.length) await new Promise(r => setTimeout(r, 10));
+        }
+      }
+      if (isMove) await deleteFolderContents(srcItem.name);
+    } else {
+      await copyBlobOnly(srcItem.name, normDest + srcItem.displayName);
+      if (isMove) await deleteBlob(srcItem.name);
+    }
+  }
+
+  // Helper — determine the parent prefix of an item
+  function _parentOf(name, itemType) {
+    if (itemType === "folder") {
+      // e.g. "foo/bar/" → parent is "foo/"
+      const trimmed = name.slice(0, -1); // remove trailing /
+      const idx = trimmed.lastIndexOf("/");
+      return idx >= 0 ? trimmed.slice(0, idx + 1) : "";
+    }
+    // file: "foo/bar/file.txt" → "foo/bar/"
+    const idx = name.lastIndexOf("/");
+    return idx >= 0 ? name.slice(0, idx + 1) : "";
+  }
+
+  const doAction = async () => {
+    const destPrefix = destInput.value.trim();
+    const normDest   = destPrefix && !destPrefix.endsWith("/") ? destPrefix + "/" : destPrefix;
+
+    // Validation — prevent moving/copying a folder into itself
+    if (type === "folder" && item && normDest.startsWith(item.name)) {
+      errEl.textContent = `Cannot ${verb.toLowerCase()} a folder into itself or a subfolder of itself.`;
+      errEl.classList.remove("hidden");
+      return;
+    }
+
+    // Bulk validation — same check for every selected folder
+    if (type === "bulk") {
+      for (const name of _selection) {
+        if (name.endsWith("/") && normDest.startsWith(name)) {
+          errEl.textContent = `Cannot ${verb.toLowerCase()} a folder into itself or a subfolder of itself.`;
+          errEl.classList.remove("hidden");
+          return;
+        }
+      }
+    }
+
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = `${verb === "Move" ? "Moving" : "Copying"}…`;
+    errEl.classList.add("hidden");
+
+    // Reset overwrite-all state for this operation
+    _overwriteAll = false;
+
+    try {
+      let bulkCount = 0;
+      const skipped = [];
+      let conflictSkipped = 0;
+
+      if (type === "bulk") {
+        bulkCount = _selection.size;
+        // Process each selected item, skipping same-location items
+        for (const name of _selection) {
+          const isFolder = name.endsWith("/");
+          const displayName = isFolder
+            ? name.slice(0, -1).split("/").pop()
+            : name.split("/").pop();
+          const parentPfx = _parentOf(name, isFolder ? "folder" : "file");
+          if (parentPfx === normDest) {
+            skipped.push(displayName);
+            continue;
+          }
+          const itemType = isFolder ? "folder" : "file";
+          const destBlob = isFolder ? "" : normDest + displayName;
+          const proceed = await _shouldProceed(displayName, destBlob, normDest, itemType);
+          if (!proceed) { conflictSkipped++; continue; }
+          await _processItem({ name, displayName }, itemType, normDest);
+        }
+        _selection.clear();
+        _updateSelectionBar();
+      } else {
+        // Single item — check same-location
+        const parentPfx = _parentOf(item.name, type);
+        if (parentPfx === normDest) {
+          close();
+          _showToast(`⏭ Skipped "${item.displayName}" — already in ${normDest || "/"}`);
+          return;
+        }
+        const destBlob = type === "folder" ? "" : normDest + item.displayName;
+        const proceed = await _shouldProceed(item.displayName, destBlob, normDest, type);
+        if (!proceed) {
+          close();
+          _showToast(`⏭ Skipped "${item.displayName}" — not overwritten`);
+          return;
+        }
+        await _processItem(item, type, normDest);
+      }
+
+      close();
+      _invalidateTreeChildren(normDest);
+      if (isMove) _invalidateTreeChildren(_currentPrefix);
+      _loadFiles(_currentPrefix);
+
+      const totalSkipped = skipped.length + conflictSkipped;
+      const processed = type === "bulk" ? bulkCount - totalSkipped : 1;
+      const itemLabel = type === "bulk"
+        ? `${processed} item${processed !== 1 ? "s" : ""}`
+        : `"${item.displayName}"`;
+
+      if (totalSkipped > 0 && processed > 0) {
+        _showToast(`✓ ${verb === "Move" ? "Moved" : "Copied"} ${itemLabel} → ${normDest || "/"} (skipped ${totalSkipped})`);
+      } else if (totalSkipped > 0 && processed === 0) {
+        _showToast(`⏭ All ${totalSkipped} item${totalSkipped !== 1 ? "s" : ""} skipped`);
+      } else {
+        _showToast(`✓ ${verb === "Move" ? "Moved" : "Copied"} ${itemLabel} → ${normDest || "/"}`);
+      }
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.classList.remove("hidden");
+    } finally {
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = `${icon} ${verb}`;
+    }
+  };
+
+  confirmBtn.onclick = doAction;
+  cancelBtn.onclick  = close;
+  closeBtn.onclick   = close;
+  modal.onclick = (e) => { if (e.target === modal) close(); };
+  destInput.onkeydown = (e) => { if (e.key === "Enter") doAction(); if (e.key === "Escape") close(); };
+}
+
 // ── Toast helper ──────────────────────────────────────────────────
 
 // ── Selection bar ───────────────────────────────────────────────
@@ -2308,6 +2734,8 @@ function _updateSelectionBar() {
     `${count} item${count !== 1 ? "s" : ""} selected`;
   // Only show delete button when user can upload (contributor+)
   _el("selBulkDeleteBtn").classList.toggle("hidden", !_canDeleteItems());
+  _el("selBulkCopyBtn").classList.toggle("hidden", !_canCopyItems());
+  _el("selBulkMoveBtn").classList.toggle("hidden", !_canMoveItems());
 }
 
 // Wire selection bar buttons once (they are always in the DOM)
@@ -2324,6 +2752,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (all) all.checked = false;
   });
   _el("selBulkDownloadBtn").addEventListener("click", _bulkDownload);
+  _el("selBulkCopyBtn").addEventListener("click",     () => _showCopyMoveModal(null, "bulk", "copy"));
+  _el("selBulkMoveBtn").addEventListener("click",     () => _showCopyMoveModal(null, "bulk", "move"));
   _el("selBulkDeleteBtn").addEventListener("click",   _bulkDelete);
 });
 
@@ -2827,7 +3257,25 @@ async function _processQueue(overwrite) {
   }
   _updateQueueCount();
   // Refresh the file list once all pending uploads finish
-  if (pending.length > 0) _loadFiles(_currentPrefix);
+  if (pending.length > 0) {
+    // Invalidate every tree node whose children may have changed (folder uploads
+    // can create new sub-prefixes at any depth).
+    const dirtyPrefixes = new Set();
+    for (const item of pending) {
+      if (item.status !== "done") continue;
+      // Walk every ancestor prefix of the uploaded blob
+      const parts = item.blobPath.split("/");
+      let acc = "";
+      for (let i = 0; i < parts.length - 1; i++) {   // skip the filename itself
+        acc += parts[i] + "/";
+        dirtyPrefixes.add(acc);
+      }
+    }
+    dirtyPrefixes.add(_currentPrefix);  // always refresh current level
+    for (const pfx of dirtyPrefixes) _invalidateTreeChildren(pfx);
+
+    _loadFiles(_currentPrefix);
+  }
 }
 
 /**

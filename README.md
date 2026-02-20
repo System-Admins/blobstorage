@@ -1,4 +1,4 @@
-# Azure Storage Explorer
+# Blob Browser
 
 A static single-page web app for managing files in Azure Blob Storage. Runs entirely in the browser as a Storage Account **Static Website** — no back-end required. Authenticates via **OAuth 2.0 PKCE** against **Microsoft Entra ID** using only native browser APIs (no libraries).
 
@@ -9,7 +9,7 @@ A static single-page web app for managing files in Azure Blob Storage. Runs enti
 - **Download** — single files or entire folders as ZIP
 - **Create / Rename / Delete** — folders and files (Contributors only)
 - **View & Edit** — preview and edit text-based files in-browser (Contributors only)
-- **Search** — current folder (instant filter) or whole container (deep scan)
+- **Search** — current folder (instant filter) or everything (deep scan)
 - **SAS generator** — User Delegation SAS URLs with configurable expiry, IP, and permissions
 - **Storage picker** — switch between subscriptions, accounts, and containers via the ARM API
 - **Email** — send file/folder links via Microsoft Graph (Mail.Send)
@@ -90,7 +90,7 @@ const CONFIG = {
     containerName: "",  // Leave empty to always show the storage picker
   },
   app: {
-    title:              "Azure Storage Explorer",
+    title:              "Blob Browser",
     allowDownload:      true,
     allowRename:        true,
     allowDelete:        true,

@@ -1,5 +1,5 @@
 /* ============================================================
-   Azure Storage Explorer — Stylesheet
+   Blob Browser — Stylesheet
    ============================================================ */
 
 :root {
@@ -1306,6 +1306,43 @@ body {
 .rename-input:focus,
 .form-input:focus { border-color: var(--azure-blue); box-shadow: 0 0 0 2px var(--azure-blue-light); }
 .rename-error { font-size: 12px; color: var(--error); margin-top: 6px; }
+
+/* ── Copy-to modal: folder picker tree ───────────────────── */
+.copy-tree-container {
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 4px;
+  font-size: 13px;
+  background: var(--bg);
+}
+.copy-tree-node { padding-left: 14px; }
+.copy-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  user-select: none;
+}
+.copy-tree-row:hover { background: var(--hover); }
+.copy-tree-row.copy-tree-active { background: var(--azure-blue-light); font-weight: 600; }
+.copy-tree-chevron {
+  background: none;
+  border: none;
+  font-size: 10px;
+  width: 16px;
+  text-align: center;
+  cursor: pointer;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  padding: 0;
+}
+.copy-tree-children { display: none; }
+.copy-tree-node.ct-expanded > .copy-tree-children { display: block; }
+.copy-tree-node.ct-expanded > .copy-tree-row > .copy-tree-chevron { transform: rotate(90deg); }
 
 /* Neutral secondary button (dark on white) */
 .btn-secondary-neutral {

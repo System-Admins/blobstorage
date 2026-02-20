@@ -33,7 +33,7 @@ const CONFIG = {
 
   // ── App behaviour ─────────────────────────────────────────
   app: {
-    title: "Azure Storage Explorer",
+    title: "Blob Browser",
 
     // Show download button for files and folders
     // Requires "Storage Blob Data Reader" (or higher) role on the container

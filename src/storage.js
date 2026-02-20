@@ -546,6 +546,31 @@ async function blobExists(blobName) {
 }
 
 /**
+ * Copy a blob to a new destination (no delete of source).
+ * @param {string} srcName   Source blob path
+ * @param {string} destName  Destination blob path
+ */
+async function copyBlobOnly(srcName, destName) {
+  const { accountName, containerName } = CONFIG.storage;
+  const authHeaders = await _storageAuthHeaders();
+  const baseUrl  = `https://${accountName}.blob.core.windows.net/${containerName}`;
+  const srcUrl   = `${baseUrl}/${_encodePath(srcName)}`;
+  const destUrl  = `${baseUrl}/${_encodePath(destName)}`;
+
+  const copyRes = await fetch(_sasUrl(destUrl), {
+    method:  "PUT",
+    headers: {
+      ...authHeaders,
+      "x-ms-copy-source": _sasUrl(srcUrl),
+    },
+  });
+  if (!copyRes.ok) {
+    const text = await copyRes.text();
+    throw new Error(`Copy failed (${copyRes.status}): ${_parseStorageError(text)}`);
+  }
+}
+
+/**
  * Rename a blob by copying it to the new name then deleting the source.
  * Works for both files and virtual folder prefixes (copies all blobs below).
  * @param {string} srcName   Source blob path
@@ -962,6 +987,7 @@ async function listAllBlobs(nameFilter = "") {
   const { accountName, containerName } = CONFIG.storage;
   const lowerFilter = nameFilter.toLowerCase();
   let allFiles = [];
+  const folderSet = new Set();
   let marker   = null;
 
   do {
@@ -1005,6 +1031,14 @@ async function listAllBlobs(nameFilter = "") {
       };
     });
 
+    // Collect all virtual folder prefixes from every blob
+    for (const b of blobs) {
+      const parts = b.name.split("/");
+      for (let i = 1; i < parts.length; i++) {
+        folderSet.add(parts.slice(0, i).join("/") + "/");
+      }
+    }
+
     // Exclude virtual-directory placeholder blobs; apply name filter
     const filtered = blobs.filter((b) => {
       if (b.name.endsWith("/.keep")) return false;
@@ -1016,5 +1050,14 @@ async function listAllBlobs(nameFilter = "") {
     if (marker === "") marker = null;
   } while (marker);
 
-  return allFiles;
+  // Build matching folder objects
+  const matchingFolders = [...folderSet]
+    .filter(f => !lowerFilter || f.toLowerCase().includes(lowerFilter))
+    .map(name => ({
+      name,
+      displayName: name.slice(0, -1).split("/").pop(),
+      type: "folder",
+    }));
+
+  return { files: allFiles, folders: matchingFolders };
 }
