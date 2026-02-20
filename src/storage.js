@@ -18,13 +18,13 @@ const _API_VERSION = "2020-10-02";
  */
 async function listBlobsAtPrefix(prefix = "") {
   const { accountName, containerName } = CONFIG.storage;
-  const token = await getStorageToken();
 
   let allFolders = [];
   let allFiles   = [];
   let marker     = null;
 
   do {
+    const token    = await getStorageToken();
     const url      = _buildListUrl(accountName, containerName, prefix, marker);
     const response = await fetch(url, {
       headers: {
@@ -839,12 +839,12 @@ function _toIso8601(date) {
  */
 async function listAllBlobs(nameFilter = "") {
   const { accountName, containerName } = CONFIG.storage;
-  const token      = await getStorageToken();
   const lowerFilter = nameFilter.toLowerCase();
   let allFiles = [];
   let marker   = null;
 
   do {
+    const token  = await getStorageToken();
     const params = new URLSearchParams({ restype: "container", comp: "list", include: "metadata" });
     if (marker) params.set("marker", marker);
     const url = `https://${accountName}.blob.core.windows.net/${containerName}?${params}`;
