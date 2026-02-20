@@ -204,6 +204,7 @@ async function _putWholeBlob(blobUrl, file, contentType, metadata = {}) {
       "x-ms-version":  _API_VERSION,
       "x-ms-blob-type": "BlockBlob",
       "Content-Type":  contentType,
+      "Content-Length": String(file.size),
       ..._buildMetaHeaders(metadata),
     },
     body: file,
@@ -539,6 +540,12 @@ function _encodePath(path) {
  * @returns {Blob}
  */
 function _buildZip(entries) {
+  if (entries.length > 65535) {
+    throw new Error(
+      `Too many files for ZIP format (${entries.length} entries, max 65\u202F535). ` +
+      `Download smaller folders individually.`
+    );
+  }
   const enc         = new TextEncoder();
   const localParts  = [];
   const centralDir  = [];

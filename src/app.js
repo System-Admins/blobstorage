@@ -1296,8 +1296,6 @@ function _setViewMode(mode) {
   _applyAndRender(); // re-render from cache — no network call, preserves search state
 }
 
-// ── Download ─────────────────────────────────────────────────
-
 // ── CSV Report ────────────────────────────────────────────
 
 async function _exportReport() {
@@ -1677,12 +1675,14 @@ function _showRenameModal(item, type) {
     errEl.classList.add("hidden");
     try {
       if (type === "folder") {
-        // Recursively rename all blobs under this folder (files and subfolders)
-        const { folders, files } = await listBlobsAtPrefix(srcName);
-        const allBlobs = [
-          ...files.map(f => f.name),
-          ...folders.map(f => f.name),
-        ];
+        // Recursively collect ALL blobs under this folder (including nested subfolders)
+        async function _collectAllBlobs(prefix) {
+          const { folders, files } = await listBlobsAtPrefix(prefix);
+          let blobs = files.map(f => f.name);
+          for (const sub of folders) blobs = blobs.concat(await _collectAllBlobs(sub.name));
+          return blobs;
+        }
+        const allBlobs = await _collectAllBlobs(srcName);
         // If folder is empty just reflect the new name (virtual folders don't exist as blobs)
         if (allBlobs.length === 0) {
           // No real blobs to move — just close and refresh
@@ -2623,10 +2623,6 @@ function _showError(msg) {
 
 function _hideError() {
   _el("errorMessage").classList.add("hidden");
-  _el("networkErrorHelp").classList.add("hidden");
-}
-
-function _hideNetworkErrorHelp() {
   _el("networkErrorHelp").classList.add("hidden");
 }
 
