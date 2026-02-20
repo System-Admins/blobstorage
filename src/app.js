@@ -1685,7 +1685,7 @@ function _showRenameModal(item, type) {
           ...files.map(f => f.name),
           ...folders.map(f => f.name),
         ];
-        // If folder is empty just reflect the new name (virtual folders don\'t exist as blobs)
+        // If folder is empty just reflect the new name (virtual folders don't exist as blobs)
         if (allBlobs.length === 0) {
           // No real blobs to move — just close and refresh
         } else {
