@@ -33,7 +33,7 @@ A static single-page web app for managing files in Azure Blob Storage. Runs enti
 1. [Azure Portal](https://portal.azure.com) → **Microsoft Entra ID** → **App registrations** → **New registration**
 2. Name it (e.g. `Storage Explorer`), set to **Single tenant**
 3. **Redirect URI** → platform **Single-page application (SPA)**:
-   - `https://<storage-account>.<zone>.web.core.windows.net` (the URL for the static website in the Azure Storage Account)
+   - `https://<storage-account>.<zone>.web.core.windows.net` (the URL for the static website in the Azure Storage Account, created in step 5)
 4. Click **Register** and copy the **Application (client) ID** and **Directory (tenant) ID**
 
 ### Step 2 — Add API permissions
