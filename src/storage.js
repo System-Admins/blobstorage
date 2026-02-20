@@ -617,35 +617,10 @@ async function copyBlobOnly(srcName, destName) {
  * @param {string} destName  Destination blob path
  */
 async function renameBlob(srcName, destName) {
-  const { accountName, containerName } = CONFIG.storage;
-  const authHeaders = await _storageAuthHeaders();
-  const baseUrl  = `https://${accountName}.blob.core.windows.net/${containerName}`;
-  const srcUrl   = `${baseUrl}/${_encodePath(srcName)}`;
-  const destUrl  = `${baseUrl}/${_encodePath(destName)}`;
-
-  // Copy — note: in SAS mode the copy-source URL also needs the SAS token
-  const copyRes = await fetch(_sasUrl(destUrl), {
-    method:  "PUT",
-    headers: {
-      ...authHeaders,
-      "x-ms-copy-source": _sasUrl(srcUrl),
-    },
-  });
-  if (!copyRes.ok) {
-    const text = await copyRes.text();
-    throw new Error(`Rename (copy) failed (${copyRes.status}): ${_parseStorageError(text)}`);
-  }
-
-  // Delete source
-  const delAuthHeaders = await _storageAuthHeaders();
-  const delRes   = await fetch(_sasUrl(srcUrl), {
-    method:  "DELETE",
-    headers: delAuthHeaders,
-  });
-  if (!delRes.ok) {
-    const text = await delRes.text();
-    throw new Error(`Rename (delete source) failed (${delRes.status}): ${_parseStorageError(text)}`);
-  }
+  try { await copyBlobOnly(srcName, destName); }
+  catch (err) { throw new Error(`Rename (copy) failed: ${err.message}`); }
+  try { await deleteBlob(srcName); }
+  catch (err) { throw new Error(`Rename (delete source) failed: ${err.message}`); }
 }
 
 function _buildListUrl(accountName, containerName, prefix, marker) {
@@ -660,6 +635,36 @@ function _buildListUrl(accountName, containerName, prefix, marker) {
   return `https://${accountName}.blob.core.windows.net/${containerName}?${params}`;
 }
 
+/**
+ * Parse a single <Blob> XML element into a file metadata object.
+ * Shared by _parseListXml() and listAllBlobs() to avoid duplicating the parsing logic.
+ *
+ * @param {Element} blob         A <Blob> DOM element from the Storage REST API XML response
+ * @param {string}  displayName  Display name to use (prefix-stripped or full path)
+ * @returns {object}  Parsed file metadata
+ */
+function _parseBlobElement(blob, displayName) {
+  const name  = blob.querySelector("Name")?.textContent ?? "";
+  const props = blob.querySelector("Properties");
+  const meta  = blob.querySelector("Metadata");
+  const metaVal = (key) => meta?.querySelector(key)?.textContent ?? "";
+  return {
+    name,
+    displayName,
+    type:            "file",
+    size:            parseInt(props?.querySelector("Content-Length")?.textContent ?? "0", 10),
+    lastModified:    props?.querySelector("Last-Modified")?.textContent ?? "",
+    createdOn:       props?.querySelector("Creation-Time")?.textContent  ?? "",
+    contentType:     props?.querySelector("Content-Type")?.textContent  ?? "application/octet-stream",
+    etag:            props?.querySelector("Etag")?.textContent ?? "",
+    md5:             props?.querySelector("Content-MD5")?.textContent ?? "",
+    uploadedByUpn:   metaVal("uploaded_by_upn"),
+    uploadedByOid:   metaVal("uploaded_by_oid"),
+    lastEditedByUpn: metaVal("last_edited_by_upn"),
+    lastEditedByOid: metaVal("last_edited_by_oid"),
+  };
+}
+
 function _parseListXml(xmlText, currentPrefix) {
   const doc = new DOMParser().parseFromString(xmlText, "application/xml");
 
@@ -672,25 +677,8 @@ function _parseListXml(xmlText, currentPrefix) {
 
   // Individual blobs (files)
   const files = [...doc.querySelectorAll("Blobs > Blob")].map((blob) => {
-    const name  = blob.querySelector("Name")?.textContent ?? "";
-    const props = blob.querySelector("Properties");
-    const meta  = blob.querySelector("Metadata");
-    const metaVal = (key) => meta?.querySelector(key)?.textContent ?? "";
-    return {
-      name,
-      displayName:     name.slice(currentPrefix.length),
-      type:            "file",
-      size:            parseInt(props?.querySelector("Content-Length")?.textContent ?? "0", 10),
-      lastModified:    props?.querySelector("Last-Modified")?.textContent ?? "",
-      createdOn:       props?.querySelector("Creation-Time")?.textContent  ?? "",
-      contentType:     props?.querySelector("Content-Type")?.textContent  ?? "application/octet-stream",
-      etag:            props?.querySelector("Etag")?.textContent ?? "",
-      md5:             props?.querySelector("Content-MD5")?.textContent ?? "",
-      uploadedByUpn:   metaVal("uploaded_by_upn"),
-      uploadedByOid:   metaVal("uploaded_by_oid"),
-      lastEditedByUpn: metaVal("last_edited_by_upn"),
-      lastEditedByOid: metaVal("last_edited_by_oid"),
-    };
+    const name = blob.querySelector("Name")?.textContent ?? "";
+    return _parseBlobElement(blob, name.slice(currentPrefix.length));
   });
 
   const rawMarker = doc.querySelector("NextMarker")?.textContent ?? "";
@@ -1056,26 +1044,9 @@ async function listAllBlobs(nameFilter = "") {
 
     const doc = new DOMParser().parseFromString(await response.text(), "application/xml");
 
-    const blobs = [...doc.querySelectorAll("Blobs > Blob")].map((blob) => {
-      const name    = blob.querySelector("Name")?.textContent ?? "";
-      const props   = blob.querySelector("Properties");
-      const meta    = blob.querySelector("Metadata");
-      const metaVal = (key) => meta?.querySelector(key)?.textContent ?? "";
-      return {
-        name,
-        displayName:     name,
-        type:            "file",
-        size:            parseInt(props?.querySelector("Content-Length")?.textContent ?? "0", 10),
-        lastModified:    props?.querySelector("Last-Modified")?.textContent ?? "",
-        createdOn:       props?.querySelector("Creation-Time")?.textContent ?? "",
-        contentType:     props?.querySelector("Content-Type")?.textContent ?? "",
-        etag:            props?.querySelector("Etag")?.textContent ?? "",
-        uploadedByUpn:   metaVal("uploaded_by_upn"),
-        uploadedByOid:   metaVal("uploaded_by_oid"),
-        lastEditedByUpn: metaVal("last_edited_by_upn"),
-        lastEditedByOid: metaVal("last_edited_by_oid"),
-      };
-    });
+    const blobs = [...doc.querySelectorAll("Blobs > Blob")].map((blob) =>
+      _parseBlobElement(blob, blob.querySelector("Name")?.textContent ?? "")
+    );
 
     // Collect all virtual folder prefixes from every blob
     for (const b of blobs) {

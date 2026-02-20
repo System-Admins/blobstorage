@@ -216,32 +216,44 @@ const _GRAPH_SCOPE      = "https://graph.microsoft.com/Mail.Send offline_access"
  * @returns {Promise<string>}
  */
 async function getGraphToken() {
-  const cached = sessionStorage.getItem(_GRAPH_TOKEN_KEY);
-  const expiry = parseInt(sessionStorage.getItem(_GRAPH_EXPIRY_KEY) || "0", 10);
+  return _refreshTokenForScope(_GRAPH_SCOPE, _GRAPH_TOKEN_KEY, _GRAPH_EXPIRY_KEY, "Graph");
+}
+
+/**
+ * Shared helper: return a cached token for the given scope/resource, or
+ * silently refresh it using the stored refresh token.
+ * Used by getGraphToken() (auth.js) and getArmToken() (arm.js).
+ *
+ * @param {string} scope      OAuth scope string for the token request
+ * @param {string} tokenKey   sessionStorage key for the access token
+ * @param {string} expiryKey  sessionStorage key for the expiry timestamp
+ * @param {string} label      Human-readable label for error messages (e.g. "Graph", "ARM")
+ * @returns {Promise<string>}  Bearer access token
+ */
+async function _refreshTokenForScope(scope, tokenKey, expiryKey, label) {
+  const cached = sessionStorage.getItem(tokenKey);
+  const expiry = parseInt(sessionStorage.getItem(expiryKey) || "0", 10);
   if (cached && Date.now() < expiry) return cached;
 
   const rt = sessionStorage.getItem(_KEYS.REFRESH_TOKEN);
   if (!rt) throw new Error("No refresh token — please sign in again.");
 
-  const res = await fetch(
-    `https://login.microsoftonline.com/${CONFIG.auth.tenantId}/oauth2/v2.0/token`,
-    {
-      method:  "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body:    new URLSearchParams({
-        client_id:     CONFIG.auth.clientId,
-        grant_type:    "refresh_token",
-        refresh_token: rt,
-        scope:         _GRAPH_SCOPE,
-      }).toString(),
-    }
-  );
+  const res = await fetch(_base() + "/token", {
+    method:  "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body:    new URLSearchParams({
+      client_id:     CONFIG.auth.clientId,
+      grant_type:    "refresh_token",
+      refresh_token: rt,
+      scope,
+    }).toString(),
+  });
 
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error_description || data.error || "Graph token request failed");
+  if (!res.ok) throw new Error(data.error_description || data.error || `${label} token request failed`);
 
-  sessionStorage.setItem(_GRAPH_TOKEN_KEY,  data.access_token);
-  sessionStorage.setItem(_GRAPH_EXPIRY_KEY, String(Date.now() + (data.expires_in - 60) * 1000));
+  sessionStorage.setItem(tokenKey,  data.access_token);
+  sessionStorage.setItem(expiryKey, String(Date.now() + (data.expires_in - 60) * 1000));
   if (data.refresh_token) sessionStorage.setItem(_KEYS.REFRESH_TOKEN, data.refresh_token);
 
   return data.access_token;

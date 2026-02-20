@@ -82,42 +82,16 @@ async function listContainers(subscriptionId, resourceGroup, accountName) {
 
 /**
  * Return a valid ARM access token, refreshing silently if expired.
- * Piggybacks on auth.js's refresh token.
+ * Piggybacks on auth.js's refresh token via the shared _refreshTokenForScope() helper.
  * @returns {Promise<string>}
  */
 async function getArmToken() {
-  // Return cached token if still valid (>60s remaining)
-  const cached = sessionStorage.getItem(_ARM_TOKEN_KEY);
-  const expiry  = parseInt(sessionStorage.getItem(_ARM_EXPIRY_KEY) || "0", 10);
-  if (cached && Date.now() < expiry) return cached;
-
-  // Fetch a new token using the stored refresh token
-  const rt = sessionStorage.getItem(_KEYS.REFRESH_TOKEN);
-  if (!rt) throw new Error("No refresh token — please sign in again.");
-
-  const res = await fetch(
-    `https://login.microsoftonline.com/${CONFIG.auth.tenantId}/oauth2/v2.0/token`,
-    {
-      method:  "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body:    new URLSearchParams({
-        client_id:     CONFIG.auth.clientId,
-        grant_type:    "refresh_token",
-        refresh_token: rt,
-        scope:         _ARM_SCOPE + " offline_access",
-      }).toString(),
-    }
+  return _refreshTokenForScope(
+    _ARM_SCOPE + " offline_access",
+    _ARM_TOKEN_KEY,
+    _ARM_EXPIRY_KEY,
+    "ARM"
   );
-
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error_description || data.error || "ARM token request failed");
-
-  sessionStorage.setItem(_ARM_TOKEN_KEY,  data.access_token);
-  sessionStorage.setItem(_ARM_EXPIRY_KEY, String(Date.now() + (data.expires_in - 60) * 1000));
-  // Rotate refresh token if Microsoft returned a new one
-  if (data.refresh_token) sessionStorage.setItem(_KEYS.REFRESH_TOKEN, data.refresh_token);
-
-  return data.access_token;
 }
 
 // ── Helpers ──────────────────────────────────────────────────
