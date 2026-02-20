@@ -127,8 +127,6 @@ async function _showPickerPage(account) {
     subList.appendChild(sk);
   }
 
-  let allAccountData = []; // flat array of { account, containers }
-
   try {
     const subscriptions = await listSubscriptions();
 
