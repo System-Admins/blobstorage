@@ -398,7 +398,7 @@ function _showSasDownloadPanel(blobPath) {
   const card = document.createElement("div");
   card.className = "sas-download-card";
   card.innerHTML = `
-    <div class="sas-download-icon">${icon}</div>
+    <div class="sas-download-icon">${_esc(icon)}</div>
     <div class="sas-download-name">${_esc(fileName)}</div>
     <p class="sas-download-hint">The SAS token grants read access to this file. What would you like to do?</p>
     <div class="sas-download-actions">
@@ -724,7 +724,14 @@ function _setStorageSelection(accountName, containerName) {
 
 function _getStorageSelection() {
   const raw = sessionStorage.getItem(_STORAGE_SELECTION_KEY);
-  return raw ? JSON.parse(raw) : null;
+  if (!raw) return null;
+  try {
+    const sel = JSON.parse(raw);
+    if (typeof sel?.accountName !== "string" || typeof sel?.containerName !== "string") return null;
+    return { accountName: sel.accountName, containerName: sel.containerName };
+  } catch {
+    return null;
+  }
 }
 
 function _restoreStorageSelection() {
@@ -827,7 +834,7 @@ function _bootApp(account) {
   _listLoadFailed = false;
   _listingPromise = null;
   _selection.clear();
-  const hashPath = window.location.hash.slice(1);
+  const hashPath = decodeURIComponent(window.location.hash.slice(1));
   _listingPromise = _loadFiles(hashPath || "");
 
   // Probe write access in parallel with the initial file listing.
@@ -1282,7 +1289,7 @@ function _makeFileRow(file) {
     <td class="col-check"><input type="checkbox" class="row-chk" data-name="${_esc(file.name)}" ${_selection.has(file.name) ? "checked" : ""} /></td>
     <td>
       <div class="file-name">
-        <span class="file-icon">${getFileIcon(file.displayName)}</span>
+        <span class="file-icon">${_esc(getFileIcon(file.displayName))}</span>
         <div class="file-name-group">
           <span>${_esc(file.displayName)}</span>
           ${_fileMetaSubtitle(file)}
@@ -1372,7 +1379,7 @@ function _makeSearchResultRow(file) {
     <td class="col-check"><input type="checkbox" class="row-chk" data-name="${_esc(file.name)}" ${_selection.has(file.name) ? "checked" : ""} /></td>
     <td>
       <div class="file-name">
-        <span class="file-icon">${getFileIcon(fileName)}</span>
+        <span class="file-icon">${_esc(getFileIcon(fileName))}</span>
         <div class="search-result-name">
           <span class="search-result-file">${_esc(fileName)}</span>
           ${parentPrefix ? `<span class="search-result-path">${_esc(parentPrefix)}</span>` : ""}
@@ -1477,7 +1484,7 @@ function _makeFileCard(file) {
   if (_selection.has(file.name)) div.classList.add("card-selected");
   div.innerHTML = `
     <input type="checkbox" class="card-chk" data-name="${_esc(file.name)}" ${_selection.has(file.name) ? "checked" : ""} title="Select" />
-    <div class="card-icon">${getFileIcon(file.displayName)}</div>
+    <div class="card-icon">${_esc(getFileIcon(file.displayName))}</div>
     <div class="card-name" title="${_esc(file.name)}">${_esc(file.displayName)}</div>
     <div class="card-meta">${formatFileSize(file.size)}</div>
     <div class="card-meta card-date">${file.createdOn ? `Created ${formatDateShort(file.createdOn)}` : ""}</div>
@@ -1600,11 +1607,8 @@ async function _showViewModal(file) {
 }
 
 function _renderViewContent(body, content, wrapped) {
-  // Escape HTML in content for safe injection into innerHTML
-  const safe = content
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  // Use _esc() for robust HTML entity encoding (handles &, <, >, ", ')
+  const safe = _esc(content);
 
   const lines    = safe.split("\n");
   const lineNums = lines.map((_, i) => i + 1).join("\n");
@@ -1656,7 +1660,7 @@ async function _showEditModal(file) {
     const lineCount = text.split("\n").length;
     metaEl.textContent = `${lineCount.toLocaleString()} line${lineCount !== 1 ? "s" : ""} · ${formatFileSize(file.size)}`;
   } catch (err) {
-    metaEl.textContent = `Failed to load: ${_esc(err.message)}`;
+    metaEl.textContent = `Failed to load: ${err.message}`;
     return;
   }
 
@@ -1682,7 +1686,7 @@ async function _showEditModal(file) {
       _loadFiles(_currentPrefix);
       _showToast(`✅ "${file.displayName}" saved`);
     } catch (err) {
-      metaEl.textContent = `Save failed: ${_esc(err.message)}`;
+      metaEl.textContent = `Save failed: ${err.message}`;
       saveBtn.disabled = false;
       saveBtn.textContent = "💾 Save";
     }
@@ -2533,6 +2537,7 @@ function _showNewModal() {
         if (u?.oid)      meta.uploaded_by_oid = u.oid;
         await uploadBlob(placeholderPath, file, null, meta);
         close();
+        _invalidateTreeChildren(_currentPrefix);
         _loadFiles(_currentPrefix + name + "/");
         _showToast(`\uD83D\uDCC1 Folder \u201C${name}\u201D created`);
       } else {
@@ -2855,7 +2860,7 @@ function _renderUploadItem(item) {
   div.id        = `upload-item-${item.id}`;
   div.className = "upload-item";
   div.innerHTML = `
-    <span class="upload-item-icon">${getFileIcon(item.file.name)}</span>
+    <span class="upload-item-icon">${_esc(getFileIcon(item.file.name))}</span>
     <div class="upload-item-info">
       <span class="upload-item-name" title="${_esc(item.blobPath)}">${_esc(item.file.name)}</span>
       <span class="upload-item-size">${formatFileSize(item.file.size)}</span>
@@ -3119,6 +3124,25 @@ async function _loadTreeChildren(prefix, parentNode) {
       return;
     }
     childrenEl.innerHTML = `<div class="tree-loading tree-load-err">Failed to load</div>`;
+  }
+}
+
+/**
+ * Remove the "loaded" cache flag from a tree node's children container
+ * so the next _syncTreeToPrefix walk will re-fetch its children from the API.
+ */
+function _invalidateTreeChildren(prefix) {
+  const treeRoot = _el("treeRoot");
+  if (!treeRoot) return;
+  for (const n of treeRoot.querySelectorAll(".tree-node")) {
+    if (n.dataset.prefix === prefix) {
+      const ch = n.querySelector(":scope > .tree-children");
+      if (ch) { delete ch.dataset.loaded; ch.innerHTML = ""; }
+      // Restore chevron visibility in case it was hidden (leaf → parent)
+      const chevron = n.querySelector(":scope > .tree-node-row > .tree-chevron");
+      if (chevron) chevron.style.visibility = "";
+      break;
+    }
   }
 }
 

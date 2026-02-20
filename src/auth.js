@@ -1,15 +1,14 @@
 // ============================================================
 //  AUTH — OAuth 2.0 Authorization Code Flow + PKCE
 //  Pure browser implementation — no external libraries required
-//  Uses: fetch, crypto.subtle, sessionStorage, localStorage, window.history
+//  Uses: fetch, crypto.subtle, sessionStorage, window.history
 //  Depends on: config.js
 // ============================================================
 
 // ── Storage keys ─────────────────────────────────────────────
-// Access token, expiry, user info, PKCE verifier and OAuth state are stored in
-// sessionStorage (cleared when the tab closes — limits XSS exposure).
-// The refresh token is stored in localStorage so the user stays signed in
-// across browser sessions until the token expires (~90 days for Entra ID).
+// All tokens (including refresh token) are stored in sessionStorage so they
+// are scoped to the browser tab and cleared when it closes — this limits
+// the blast radius of any XSS. Users must re-authenticate per session.
 
 const _KEYS = {
   ACCESS_TOKEN:  "be_access_token",
@@ -89,7 +88,7 @@ async function initAuth() {
   }
 
   // ── Try a silent refresh ──
-  const rt = localStorage.getItem(_KEYS.REFRESH_TOKEN);
+  const rt = sessionStorage.getItem(_KEYS.REFRESH_TOKEN);
   if (rt) {
     try {
       await _doRefresh(rt);
@@ -178,7 +177,7 @@ async function getStorageToken() {
     return sessionStorage.getItem(_KEYS.ACCESS_TOKEN);
   }
 
-  const rt = localStorage.getItem(_KEYS.REFRESH_TOKEN);
+  const rt = sessionStorage.getItem(_KEYS.REFRESH_TOKEN);
   if (rt) {
     await _doRefresh(rt);
     return sessionStorage.getItem(_KEYS.ACCESS_TOKEN);
@@ -190,7 +189,14 @@ async function getStorageToken() {
 /** Return the stored user object or null. */
 function getUser() {
   const raw = sessionStorage.getItem(_KEYS.USER);
-  return raw ? JSON.parse(raw) : null;
+  if (!raw) return null;
+  try {
+    const u = JSON.parse(raw);
+    if (typeof u?.name !== "string") return null;
+    return { name: u.name, username: String(u.username || ""), oid: String(u.oid || "") };
+  } catch {
+    return null;
+  }
 }
 
 /** Return true if a valid (non-expired) access token is currently stored. */
@@ -214,7 +220,7 @@ async function getGraphToken() {
   const expiry = parseInt(sessionStorage.getItem(_GRAPH_EXPIRY_KEY) || "0", 10);
   if (cached && Date.now() < expiry) return cached;
 
-  const rt = localStorage.getItem(_KEYS.REFRESH_TOKEN);
+  const rt = sessionStorage.getItem(_KEYS.REFRESH_TOKEN);
   if (!rt) throw new Error("No refresh token — please sign in again.");
 
   const res = await fetch(
@@ -236,7 +242,7 @@ async function getGraphToken() {
 
   sessionStorage.setItem(_GRAPH_TOKEN_KEY,  data.access_token);
   sessionStorage.setItem(_GRAPH_EXPIRY_KEY, String(Date.now() + (data.expires_in - 60) * 1000));
-  if (data.refresh_token) localStorage.setItem(_KEYS.REFRESH_TOKEN, data.refresh_token);
+  if (data.refresh_token) sessionStorage.setItem(_KEYS.REFRESH_TOKEN, data.refresh_token);
 
   return data.access_token;
 }
@@ -282,10 +288,10 @@ async function _fetchTokens(body) {
     String(Date.now() + (data.expires_in - 60) * 1000)
   );
 
-  // Persist refresh token in localStorage so the session survives tab/browser close.
+  // Persist refresh token in sessionStorage (tab-scoped — limits XSS exposure).
   // (returned on first exchange and when rotated)
   if (data.refresh_token) {
-    localStorage.setItem(_KEYS.REFRESH_TOKEN, data.refresh_token);
+    sessionStorage.setItem(_KEYS.REFRESH_TOKEN, data.refresh_token);
   }
 
   // Decode user info from the id_token for display purposes
@@ -356,7 +362,6 @@ function _getUser() {
 
 function _clearSession() {
   Object.values(_KEYS).forEach((k) => sessionStorage.removeItem(k));
-  localStorage.removeItem(_KEYS.REFRESH_TOKEN);
   // Also clear cached resource-specific tokens (ARM, Graph)
   sessionStorage.removeItem(_ARM_TOKEN_KEY);
   sessionStorage.removeItem(_ARM_EXPIRY_KEY);

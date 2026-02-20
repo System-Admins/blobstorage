@@ -87,7 +87,7 @@ async function getArmToken() {
   if (cached && Date.now() < expiry) return cached;
 
   // Fetch a new token using the stored refresh token
-  const rt = localStorage.getItem(_KEYS.REFRESH_TOKEN);
+  const rt = sessionStorage.getItem(_KEYS.REFRESH_TOKEN);
   if (!rt) throw new Error("No refresh token — please sign in again.");
 
   const res = await fetch(
@@ -110,7 +110,7 @@ async function getArmToken() {
   sessionStorage.setItem(_ARM_TOKEN_KEY,  data.access_token);
   sessionStorage.setItem(_ARM_EXPIRY_KEY, String(Date.now() + (data.expires_in - 60) * 1000));
   // Rotate refresh token if Microsoft returned a new one
-  if (data.refresh_token) localStorage.setItem(_KEYS.REFRESH_TOKEN, data.refresh_token);
+  if (data.refresh_token) sessionStorage.setItem(_KEYS.REFRESH_TOKEN, data.refresh_token);
 
   return data.access_token;
 }
