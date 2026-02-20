@@ -484,7 +484,7 @@ function _goUp() {
 
 async function _loadFiles(prefix) {
   _currentPrefix = prefix;
-  history.replaceState(null, "", prefix ? `#${prefix}` : window.location.pathname);
+  history.replaceState(null, "", prefix ? `#${encodeURIComponent(prefix)}` : window.location.pathname);
   _selection.clear();
   _updateSelectionBar();
   _el("upBtn").classList.toggle("hidden", !prefix);
