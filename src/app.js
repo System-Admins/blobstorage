@@ -1679,7 +1679,7 @@ function _showRenameModal(item, type) {
     errEl.classList.add("hidden");
     try {
       if (type === "folder") {
-        // Rename all blobs sharing the folder prefix
+        // Recursively rename all blobs under this folder (files and subfolders)
         const { folders, files } = await listBlobsAtPrefix(srcName);
         const allBlobs = [
           ...files.map(f => f.name),
