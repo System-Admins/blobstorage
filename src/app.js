@@ -1662,7 +1662,7 @@ function _showRenameModal(item, type) {
     const newName = input.value.trim();
     if (!newName || newName === item.displayName) { close(); return; }
     if (newName.includes("/")) {
-      errEl.textContent = "Name cannot contain \"\\\"";
+      errEl.textContent = "Name cannot contain \"/\"";
       errEl.classList.remove("hidden");
       return;
     }
