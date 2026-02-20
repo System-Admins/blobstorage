@@ -78,9 +78,13 @@ const CONFIG = {
     ["CONFIG.auth.tenantId",  CONFIG.auth.tenantId,  "TENANT ID GOES HERE"],
   ];
   for (const [key, value, placeholder] of placeholders) {
-    if (value === placeholder) {
+    if (
+      typeof value !== "string" ||
+      value === placeholder ||
+      value.trim() === ""
+    ) {
       throw new Error(
-        `[config] ${key} is still set to its placeholder value "${placeholder}". ` +
+        `[config] ${key} is not configured correctly. It must be set to a non-empty value instead of "${placeholder}". ` +
         "Update config.js with your actual Azure App Registration details before deploying."
       );
     }
