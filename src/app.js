@@ -483,6 +483,7 @@ function _goUp() {
 }
 
 async function _loadFiles(prefix) {
+  _listLoadFailed = false;
   _currentPrefix = prefix;
   history.replaceState(null, "", prefix ? `#${encodeURIComponent(prefix)}` : window.location.pathname);
   _selection.clear();
