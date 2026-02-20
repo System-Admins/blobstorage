@@ -67,6 +67,10 @@ async function initAuth() {
       throw new Error("OAuth state mismatch — possible CSRF attack. Please sign in again.");
     }
 
+    if (!codeVerifier) {
+      throw new Error("Missing PKCE code verifier — please sign in again.");
+    }
+
     await _exchangeCode(code, codeVerifier);
     return _getUser();
   }

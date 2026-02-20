@@ -11,10 +11,12 @@ const CONFIG = {
     // Directory (tenant) ID — or "common" for multi-tenant
     tenantId: "TENANT ID GOES HERE",
 
-    // Must match a Redirect URI registered as a "Single-page application"
-    // Local dev  → http://localhost:3000
-    // Production → https://<account>.z13.web.core.windows.net
-    redirectUri: 'https://contoso.z6.web.core.windows.net',
+    // Must match a Redirect URI registered as a "Single-page application" in
+    // your App Registration. Derived automatically from the current origin so
+    // the same build works for both local dev and production. Register
+    // window.location.origin (e.g. http://localhost:3000 or
+    // https://<account>.z13.web.core.windows.net) as an SPA redirect URI.
+    redirectUri: window.location.origin,
   },
 
   // ── Azure Blob Storage ────────────────────────────────────
