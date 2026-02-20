@@ -27,7 +27,8 @@ const _SCOPES = "https://storage.azure.com/user_impersonation offline_access ope
 // Storage and ARM in a single sign-in prompt. Token exchanges still use the
 // resource-specific _SCOPES — the ARM token is fetched separately via the
 // refresh token once consent has been granted.
-const _SCOPES_AUTHORIZE = _SCOPES + " https://management.azure.com/user_impersonation";
+// Mail.Send is included so the user can share links via email (Exchange Online).
+const _SCOPES_AUTHORIZE = _SCOPES + " https://management.azure.com/user_impersonation https://graph.microsoft.com/Mail.Send";
 
 // ── Endpoint helpers ─────────────────────────────────────────
 
@@ -53,6 +54,13 @@ async function initAuth() {
   // ── Returning from Microsoft login redirect ──
   if (error) {
     _cleanUrl();
+    // If this was a silent (prompt=none) attempt, a login_required / interaction_required
+    // error just means no active SSO session — fall through to the sign-in page.
+    const wasSilent = sessionStorage.getItem("be_silent_attempt");
+    sessionStorage.removeItem("be_silent_attempt");
+    if (wasSilent && /login_required|interaction_required|consent_required/i.test(error)) {
+      return null; // Let the caller show the sign-in page
+    }
     throw new Error(params.get("error_description") || error);
   }
 
@@ -93,6 +101,33 @@ async function initAuth() {
   }
 
   return null; // Caller must show sign-in UI
+}
+
+/**
+ * Attempt a silent SSO sign-in using prompt=none.
+ * The browser redirects away. If an active Entra ID session exists the user
+ * comes back already authenticated; if not, initAuth() will return null and
+ * the sign-in page is shown.
+ */
+async function signInSilent() {
+  const verifier  = _generateVerifier();
+  const challenge = await _generateChallenge(verifier);
+  const state     = _generateState();
+
+  sessionStorage.setItem(_KEYS.CODE_VERIFIER, verifier);
+  sessionStorage.setItem(_KEYS.STATE, state);
+  sessionStorage.setItem("be_silent_attempt", "1");
+
+  window.location.href = _base() + "/authorize?" + new URLSearchParams({
+    client_id:             CONFIG.auth.clientId,
+    response_type:         "code",
+    redirect_uri:          CONFIG.auth.redirectUri,
+    scope:                 _SCOPES_AUTHORIZE,
+    code_challenge:        challenge,
+    code_challenge_method: "S256",
+    state,
+    prompt:                "none", // succeed silently or return login_required
+  });
 }
 
 /**
@@ -161,6 +196,49 @@ function getUser() {
 /** Return true if a valid (non-expired) access token is currently stored. */
 function isAuthenticated() {
   return _hasValidToken();
+}
+
+// ── Microsoft Graph token ────────────────────────────────────
+
+const _GRAPH_TOKEN_KEY  = "be_graph_token";
+const _GRAPH_EXPIRY_KEY = "be_graph_token_expiry";
+const _GRAPH_SCOPE      = "https://graph.microsoft.com/Mail.Send offline_access";
+
+/**
+ * Return a valid Microsoft Graph access token, refreshing silently if expired.
+ * Piggybacks on auth.js's refresh token.
+ * @returns {Promise<string>}
+ */
+async function getGraphToken() {
+  const cached = sessionStorage.getItem(_GRAPH_TOKEN_KEY);
+  const expiry = parseInt(sessionStorage.getItem(_GRAPH_EXPIRY_KEY) || "0", 10);
+  if (cached && Date.now() < expiry) return cached;
+
+  const rt = localStorage.getItem(_KEYS.REFRESH_TOKEN);
+  if (!rt) throw new Error("No refresh token — please sign in again.");
+
+  const res = await fetch(
+    `https://login.microsoftonline.com/${CONFIG.auth.tenantId}/oauth2/v2.0/token`,
+    {
+      method:  "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body:    new URLSearchParams({
+        client_id:     CONFIG.auth.clientId,
+        grant_type:    "refresh_token",
+        refresh_token: rt,
+        scope:         _GRAPH_SCOPE,
+      }).toString(),
+    }
+  );
+
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error_description || data.error || "Graph token request failed");
+
+  sessionStorage.setItem(_GRAPH_TOKEN_KEY,  data.access_token);
+  sessionStorage.setItem(_GRAPH_EXPIRY_KEY, String(Date.now() + (data.expires_in - 60) * 1000));
+  if (data.refresh_token) localStorage.setItem(_KEYS.REFRESH_TOKEN, data.refresh_token);
+
+  return data.access_token;
 }
 
 // ── Token requests ────────────────────────────────────────────
@@ -279,6 +357,11 @@ function _getUser() {
 function _clearSession() {
   Object.values(_KEYS).forEach((k) => sessionStorage.removeItem(k));
   localStorage.removeItem(_KEYS.REFRESH_TOKEN);
+  // Also clear cached resource-specific tokens (ARM, Graph)
+  sessionStorage.removeItem(_ARM_TOKEN_KEY);
+  sessionStorage.removeItem(_ARM_EXPIRY_KEY);
+  sessionStorage.removeItem(_GRAPH_TOKEN_KEY);
+  sessionStorage.removeItem(_GRAPH_EXPIRY_KEY);
 }
 
 /** Remove ?code=...&state=... from the browser URL without a page reload. */

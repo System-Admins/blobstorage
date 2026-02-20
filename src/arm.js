@@ -117,6 +117,44 @@ async function getArmToken() {
 
 // ── Helpers ──────────────────────────────────────────────────
 
+/**
+ * Check whether the blob service of a storage account has a CORS rule that
+ * allows the current browser origin.
+ * Returns true  if a matching rule is found (or if the ARM call fails —
+ *               we don't want to hide accounts just because the ARM CORS
+ *               endpoint returned 403 due to insufficient IAM permissions).
+ * Returns false only when the account is definitively reachable but has
+ * zero CORS rules that permit the current origin.
+ *
+ * @param {string} subscriptionId
+ * @param {string} resourceGroup
+ * @param {string} accountName
+ * @returns {Promise<boolean>}
+ */
+async function getBlobServiceCors(subscriptionId, resourceGroup, accountName) {
+  try {
+    const token = await getArmToken();
+    const url   = `${_ARM_BASE}/subscriptions/${subscriptionId}/resourceGroups/${resourceGroup}`
+                + `/providers/Microsoft.Storage/storageAccounts/${accountName}`
+                + `/blobServices/default?api-version=${_ARM_VERSION}`;
+    const res   = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) return true; // Can't confirm — keep account visible
+    const data  = await res.json();
+    const rules = data?.properties?.cors?.corsRules ?? [];
+    if (rules.length === 0) return false; // No rules at all
+    const origin = window.location.origin.toLowerCase();
+    return rules.some(rule => {
+      const origins = (rule.allowedOrigins ?? []).map(o => o.toLowerCase());
+      if (!origins.includes("*") && !origins.includes(origin)) return false;
+      const methods = (rule.allowedMethods ?? []).map(m => m.toUpperCase());
+      // Must allow at least GET (read) — wildcard (*) is not a standard CORS method value
+      return methods.includes("GET");
+    });
+  } catch {
+    return true; // Network/token error — keep account visible
+  }
+}
+
 function _parseRg(resourceId) {
   // /subscriptions/{sub}/resourceGroups/{rg}/providers/...
   const m = resourceId.match(/resourceGroups\/([^/]+)\//i);

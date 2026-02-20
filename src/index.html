@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <!-- X-Content-Type-Options must be set as an HTTP response header on your server/CDN, not as a meta tag -->
-  <title>Blob Storage Explorer</title>
+  <title>Azure Storage Explorer</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -19,7 +19,7 @@
   <div id="signInPage" class="sign-in-page hidden">
     <div class="sign-in-card">
       <div class="app-logo">☁️</div>
-      <h1>Blob Storage Explorer</h1>
+      <h1>Azure Storage Explorer</h1>
       <p>Sign in with your Microsoft account to browse your storage container.</p>
       <button id="signInBtn" class="btn btn-primary">
         Sign in with Microsoft
@@ -36,14 +36,14 @@
     <header class="picker-header">
       <div class="picker-header-left">
         <span class="header-logo">☁️</span>
-        <h1 class="header-title">Blob Storage Explorer</h1>
+        <h1 class="header-title">Azure Storage Explorer</h1>
       </div>
       <div class="picker-header-right">
         <div class="user-info" id="pickerUserInfo">
           <span class="user-name" id="pickerUserName"></span>
         </div>
         <button id="pickerBackBtn" class="btn btn-secondary hidden" title="Return to current container">← Back to explorer</button>
-        <button id="pickerSignOutBtn" class="btn btn-secondary">Sign out</button>
+        <button id="pickerSignOutBtn" class="btn btn-secondary" title="Sign out">🚪 <span class="btn-label">Sign out</span></button>
       </div>
     </header>
 
@@ -63,6 +63,13 @@
       </div>
 
       <div id="pickerError" class="picker-error hidden"></div>
+
+      <p class="picker-cors-hint">
+        ℹ️ Not seeing all your storage accounts? Accounts without a CORS rule that permits
+        <strong id="pickerOriginHint"></strong> are hidden automatically.
+        Ask your administrator to add your origin under
+        <em>Azure Portal → Storage Account → Resource sharing (CORS) → Blob service</em>.
+      </p>
     </div>
   </div>
 
@@ -73,7 +80,7 @@
     <header class="header">
       <div class="header-left">
         <span class="header-logo">☁️</span>
-        <h1 class="header-title">Blob Storage Explorer</h1>
+        <h1 class="header-title">Azure Storage Explorer</h1>
         <span class="header-subtitle" id="storageInfo"></span>
       </div>
       <div class="header-right">
@@ -82,7 +89,8 @@
           <span class="user-name" id="userDisplayName"></span>
         </div>
         <button id="changeStorageBtn" class="btn btn-secondary" title="Switch storage account or container">🗄️ <span class="btn-label">Change</span></button>
-        <button id="signOutBtn" class="btn btn-secondary">Sign out</button>
+        <button id="helpBtn" class="btn btn-secondary" title="Help">❓ <span class="btn-label">Help</span></button>
+        <button id="signOutBtn" class="btn btn-secondary" title="Sign out">🚪 <span class="btn-label">Sign out</span></button>
       </div>
     </header>
 
@@ -185,7 +193,7 @@
             <ul class="network-error-list">
               <li>
                 <strong>🔒 Network access is blocked</strong> — Ask your administrator to allow your public IP address under<br>
-                <em>Azure Portal → Storage Account → Networking → Firewalls and virtual networks</em>
+                <em>Azure Portal → Storage Account → Networking</em>
               </li>
               <li>
                 <strong>🌐 CORS is not configured</strong> — Ask your administrator to add the following origin to the Blob service CORS rules under<br>
@@ -204,7 +212,7 @@
       </div><!-- /.app-content-col -->
     </div><!-- /.app-body -->
     <footer class="app-footer">
-      <a href="https://www.systemadmins.com" target="_blank" rel="noopener noreferrer">&copy; <span id="footerYear"></span> System Admins ApS</a>
+      Developed by <a href="https://www.systemadmins.com" target="_blank" rel="noopener noreferrer">System Admins</a> &middot; &copy; <span id="footerYear"></span>
     </footer>
 
   </div><!-- /#mainApp -->
@@ -406,6 +414,7 @@
           <div class="sas-result-row">
             <textarea id="sasResult" class="rename-input sas-result-textarea" readonly spellcheck="false"></textarea>
             <button class="btn btn-icon btn-small sas-copy-btn" id="sasCopyBtn" title="Copy SAS URL">&#x1F4CB; Copy</button>
+            <button class="btn btn-icon btn-small sas-email-btn hidden" id="sasEmailBtn" title="Email SAS URL">&#x1F4E7; Email</button>
           </div>
           <p class="sas-expires-note" id="sasExpiresNote"></p>
         </div>
@@ -416,6 +425,112 @@
       </div>
     </div>
   </div>
+  <!-- ── Help modal ─────────────────────────────────── -->
+  <div id="helpModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="helpModalTitle">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <h2 class="modal-title" id="helpModalTitle">❓ Help &amp; User Guide</h2>
+        <button class="modal-close" id="helpModalClose" aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body help-modal-body">
+
+        <div class="help-section">
+          <h3 class="help-heading">📋 Overview</h3>
+          <p>Azure Storage Explorer lets you browse, download, upload, and manage files stored in an Azure Blob Storage container — directly from your browser, without any additional software.</p>
+        </div>
+
+        <div class="help-section">
+          <h3 class="help-heading">🔐 Signing in &amp; permissions</h3>
+          <ul class="help-list">
+            <li>Sign in with your Microsoft (Entra ID) account using the <strong>Sign in with Microsoft</strong> button.</li>
+            <li>Your access level is shown as a badge in the top-right corner:<br>
+              <span class="help-badge help-badge-reader">📖 Reader</span> — you can browse and download files.<br>
+              <span class="help-badge help-badge-writer">&#9999;&#xFE0F; Writer</span> — you can also upload, create, rename and delete files.
+            </li>
+            <li>If you need more access, contact your administrator to adjust your Azure role assignment.</li>
+            <li>Alternatively, use <strong>🔑 Open SAS URL</strong> to browse a container or file using a Shared Access Signature URL provided by an administrator.</li>
+          </ul>
+        </div>
+
+        <div class="help-section">
+          <h3 class="help-heading">📂 Navigating folders</h3>
+          <ul class="help-list">
+            <li>Click a folder in the file list to open it.</li>
+            <li>Use the <strong>breadcrumb bar</strong> at the top to jump back to any parent folder.</li>
+            <li>Use the <strong>Tree view</strong> sidebar on the left to jump directly to any folder.</li>
+            <li>The <strong>↑ Up</strong> toolbar button takes you to the parent folder of the current location.</li>
+          </ul>
+        </div>
+
+        <div class="help-section">
+          <h3 class="help-heading">👁️ Viewing &amp; downloading files</h3>
+          <ul class="help-list">
+            <li>Click any file to preview it (text, code, images, PDF, video and audio files are supported).</li>
+            <li>Use the <strong>⬇ Download</strong> button on a file row to save it to your computer.</li>
+            <li>Use the <strong>⬇ Download</strong> toolbar button to download everything in the current folder as a ZIP archive.</li>
+            <li>Select multiple files using the checkboxes, then choose <strong>⬇ Download</strong> in the selection bar to download them all as a ZIP.</li>
+          </ul>
+        </div>
+
+        <div class="help-section">
+          <h3 class="help-heading">⬆️ Uploading files <span class="help-requires-writer">(Writer role required)</span></h3>
+          <ul class="help-list">
+            <li>Click the <strong>⬆ Upload</strong> toolbar button to open the upload panel.</li>
+            <li>Drag &amp; drop files or folders directly onto the panel, or use <strong>Select files</strong> / <strong>Select folder</strong>.</li>
+            <li>Files are uploaded into the folder you are currently browsing.</li>
+            <li>If a file with the same name exists, you will be asked whether to overwrite or skip it.</li>
+          </ul>
+        </div>
+
+        <div class="help-section">
+          <h3 class="help-heading">➕ Creating files &amp; folders <span class="help-requires-writer">(Writer role required)</span></h3>
+          <ul class="help-list">
+            <li>Click <strong>&#xff0b; New</strong> in the toolbar to create a new folder or a new text file in the current location.</li>
+          </ul>
+        </div>
+
+        <div class="help-section">
+          <h3 class="help-heading">✏️ Renaming &amp; deleting <span class="help-requires-writer">(Writer role required)</span></h3>
+          <ul class="help-list">
+            <li>Hover over any file or folder row and use the action buttons that appear on the right.</li>
+            <li>To delete multiple items at once, select them with the checkboxes and click <strong>🗑️ Delete</strong> in the selection bar.</li>
+          </ul>
+        </div>
+
+        <div class="help-section">
+          <h3 class="help-heading">🔍 Searching</h3>
+          <ul class="help-list">
+            <li>Click the <strong>🔍 Search</strong> toolbar button to open the search bar.</li>
+            <li><strong>Current folder</strong> — filters the files and folders visible in the current location.</li>
+            <li><strong>Whole container</strong> — searches every file name across the entire container.</li>
+          </ul>
+        </div>
+
+        <div class="help-section">
+          <h3 class="help-heading">� Sharing links &amp; emailing</h3>
+          <ul class="help-list">
+            <li>Click the <strong>🔗 Copy URL</strong> button on any file or folder to copy a direct blob URL or an app link.</li>
+            <li>If you are signed in with a Microsoft account that has an <strong>Exchange Online</strong> license, you can also send the link directly via email from the same menu.</li>
+            <li>When generating a <strong>SAS token</strong>, the generated URL can also be emailed using the <strong>📧 Email</strong> button.</li>
+          </ul>
+        </div>
+
+        <div class="help-section">
+          <h3 class="help-heading">�🔑 Opening a SAS URL</h3>
+          <ul class="help-list">
+            <li>Click <strong>🔑 Open SAS URL</strong> in the header (or on the sign-in page) and paste in a SAS URL provided by your administrator.</li>
+            <li>The application will automatically detect what the SAS permits (list, read, write, delete) and adjust the available actions accordingly.</li>
+            <li>Click <strong>Disconnect</strong> to leave SAS mode and return to your normal session.</li>
+          </ul>
+        </div>
+
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary-neutral" id="helpCloseBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Open SAS modal ──────────────────────────────── -->
   <div id="openSasModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="openSasModalTitle">
     <div class="modal">
@@ -443,6 +558,36 @@
       <div class="modal-footer">
         <button class="btn btn-secondary-neutral" id="openSasCancelBtn">Cancel</button>
         <button class="btn btn-primary-sm" id="openSasOpenBtn" disabled>🔑 Open</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Email compose modal ──────────────────────────── -->
+  <div id="emailModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="emailModalTitle">
+    <div class="modal email-modal">
+      <div class="modal-header">
+        <h2 class="modal-title" id="emailModalTitle">📧 Send link via email</h2>
+        <button class="modal-close" id="emailModalClose" aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label" for="emailTo">To <span class="form-hint">(separate multiple with ; or ,)</span></label>
+          <input class="form-input" type="text" id="emailTo" placeholder="recipient@example.com" autocomplete="email" />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="emailSubject">Subject</label>
+          <input class="form-input" type="text" id="emailSubject" />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="emailBody">Message</label>
+          <textarea class="form-input email-body-textarea" id="emailBody" rows="6"></textarea>
+        </div>
+        <p id="emailError" class="form-error hidden"></p>
+        <p id="emailSending" class="form-hint hidden">⏳ Sending…</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary-neutral" id="emailCancelBtn">Cancel</button>
+        <button class="btn btn-primary-sm" id="emailSendBtn">📨 Send</button>
       </div>
     </div>
   </div>

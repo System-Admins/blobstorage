@@ -1,4 +1,4 @@
-# Azure Blob Storage Explorer
+# Azure Storage Explorer
 
 A static single-page web application for browsing, downloading, uploading, and managing files in Azure Blob Storage. Runs entirely in the browser as a Storage Account **Static Website** — no back-end or server required.
 
@@ -182,7 +182,7 @@ const CONFIG = {
     containerName: "",   // Container to browse. Empty = always show picker.
   },
   app: {
-    title:              "Blob Storage Explorer",
+    title:              "Azure Storage Explorer",
     allowDownload:      true,   // Show download button on files
     allowRename:        true,   // Show rename option (contributors only)
     allowDelete:        true,   // Show delete option (contributors only)
@@ -205,7 +205,7 @@ const CONFIG = {
 | `auth.redirectUri` | — | **Required.** Must match a registered SPA Redirect URI exactly. |
 | `storage.accountName` | `""` | Storage account name. Leave empty to always prompt the picker. |
 | `storage.containerName` | `""` | Container name. Leave empty to always prompt the picker. |
-| `app.title` | `"Blob Storage Explorer"` | Title shown in the browser tab and app header. |
+| `app.title` | `"Azure Storage Explorer"` | Title shown in the browser tab and app header. |
 | `app.allowDownload` | `true` | Show or hide the download button on files. |
 | `app.allowRename` | `true` | Show or hide rename buttons (only visible to Contributors anyway). |
 | `app.allowDelete` | `true` | Show or hide delete buttons (only visible to Contributors anyway). |

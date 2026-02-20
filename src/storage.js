@@ -156,9 +156,10 @@ async function listBlobsAtPrefix(prefix = "") {
     if (!response.ok) {
       const text = await response.text();
       if (response.status === 403) {
-        throw new Error(
-          "Access denied (403). The signed-in user does not have a Storage data-plane role on this container. " +
-          "Assign the 'Storage Blob Data Reader' role via Access control (IAM) on the storage account, then sign out and back in."
+        throw new Error(_SAS_STATE.active
+          ? "Access denied (403). The SAS token does not include 'List' (l) permission. Regenerate the SAS URL with list permission enabled."
+          : "Access denied (403). The signed-in user does not have a Storage data-plane role on this container. " +
+            "Assign the 'Storage Blob Data Reader' role via Access control (IAM) on the storage account, then sign out and back in."
         );
       }
       throw new Error(`Storage API ${response.status}: ${_parseStorageError(text)}`);
@@ -197,8 +198,9 @@ async function downloadBlob(blobName) {
 
   if (!response.ok) {
     if (response.status === 403) {
-      throw new Error(
-        "Access denied (403). Assign the 'Storage Blob Data Reader' role via IAM on the storage account."
+      throw new Error(_SAS_STATE.active
+        ? "Access denied (403). The SAS token does not include 'Read' (r) permission. Regenerate the SAS URL with read permission enabled."
+        : "Access denied (403). Assign the 'Storage Blob Data Reader' role via IAM on the storage account."
       );
     }
     throw new Error(`Download failed (${response.status}): ${response.statusText}`);
@@ -271,8 +273,9 @@ async function uploadBlob(blobPath, file, onProgress, metadata = {}) {
 
     if (!res.ok) {
       const text = await res.text();
-      if (res.status === 403) throw new Error(
-        "Upload denied (403). Assign the 'Storage Blob Data Contributor' role via IAM on the storage account."
+      if (res.status === 403) throw new Error(_SAS_STATE.active
+        ? "Upload denied (403). The SAS token does not include write permission (w/c/a). Regenerate the SAS URL with write permission enabled."
+        : "Upload denied (403). Assign the 'Storage Blob Data Contributor' role via IAM on the storage account."
       );
       throw new Error(`Block upload failed (${res.status}): ${_parseStorageError(text)}`);
     }
@@ -322,8 +325,9 @@ async function _putWholeBlob(blobUrl, file, contentType, metadata = {}) {
   });
   if (!res.ok) {
     const text = await res.text();
-    if (res.status === 403) throw new Error(
-      "Upload denied (403). Assign the 'Storage Blob Data Contributor' role via IAM on the storage account."
+    if (res.status === 403) throw new Error(_SAS_STATE.active
+      ? "Upload denied (403). The SAS token does not include write permission (w/c/a). Regenerate the SAS URL with write permission enabled."
+      : "Upload denied (403). Assign the 'Storage Blob Data Contributor' role via IAM on the storage account."
     );
     throw new Error(`Upload failed (${res.status}): ${_parseStorageError(text)}`);
   }
@@ -433,8 +437,9 @@ async function deleteBlob(blobName) {
 
   if (!res.ok) {
     const text = await res.text();
-    if (res.status === 403) throw new Error(
-      "Delete denied (403). Assign the 'Storage Blob Data Contributor' role via IAM on the storage account."
+    if (res.status === 403) throw new Error(_SAS_STATE.active
+      ? "Delete denied (403). The SAS token does not include 'Delete' (d) permission. Regenerate the SAS URL with delete permission enabled."
+      : "Delete denied (403). Assign the 'Storage Blob Data Contributor' role via IAM on the storage account."
     );
     throw new Error(`Delete failed (${res.status}): ${_parseStorageError(text)}`);
   }

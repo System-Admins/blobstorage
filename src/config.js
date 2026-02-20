@@ -33,7 +33,7 @@ const CONFIG = {
 
   // ── App behaviour ─────────────────────────────────────────
   app: {
-    title: "Blob Storage Explorer",
+    title: "Azure Storage Explorer",
 
     // Show download button for files and folders
     // Requires "Storage Blob Data Reader" (or higher) role on the container
@@ -57,6 +57,11 @@ const CONFIG = {
     // Show the Permissions checkboxes in the SAS modal.
     // Set to false to hide them and always issue a read-only SAS.
     sasShowPermissions: false,
+
+    // Allow users to send file/folder links via email using the signed-in
+    // user's Exchange Online mailbox (Microsoft Graph Mail.Send).
+    // The user must have an Exchange Online license.
+    allowEmail: true,
   },
 
   // ── Upload ─────────────────────────────────────────────────

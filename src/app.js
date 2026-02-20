@@ -26,6 +26,7 @@ function _canRenameItems() { return _canUpload && (CONFIG.app.allowRename !== fa
 function _canDeleteItems() { return _canUpload && (CONFIG.app.allowDelete !== false); }
 function _canSas()         { return !isSasMode() && _canUpload && CONFIG.app.allowSas !== false; }
 function _canEditItems()   { return _canUpload; }
+function _canEmail()       { return !isSasMode() && CONFIG.app.allowEmail !== false && !!getUser(); }
 
 // ── Entry point ──────────────────────────────────────────────
 
@@ -34,6 +35,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   try {
     const account = await initAuth();
     if (account) {
+      sessionStorage.removeItem("be_silent_tried"); // clean up if a silent attempt just succeeded
       // Restore a previously chosen storage selection (survives page refresh)
       _restoreStorageSelection();
       // Show picker when no storage is configured, unless the picker is disabled
@@ -45,16 +47,26 @@ document.addEventListener("DOMContentLoaded", async () => {
         _bootApp(account);
       }
     } else {
-      // No stored session — redirect straight to Microsoft login.
-      // If the user already has an active Entra ID / M365 session the
-      // browser will be sent straight back without any login prompt (SSO).
-      await signIn();
-      // signIn() navigates away — nothing below executes.
+      // No stored session. On the very first load, attempt silent SSO (prompt=none)
+      // so users with an active Entra ID / M365 session sign in automatically.
+      // We mark sessionStorage *before* navigating so the return trip knows we
+      // already tried — avoiding an infinite silent-redirect loop.
+      const alreadyTriedSilent = sessionStorage.getItem("be_silent_tried");
+      if (!alreadyTriedSilent) {
+        sessionStorage.setItem("be_silent_tried", "1");
+        _showLoading(true);
+        await signInSilent();
+        // signInSilent() navigates away — nothing below executes.
+      } else {
+        // Silent attempt already made and failed (no active SSO session).
+        // Remove the flag and show the sign-in page.
+        sessionStorage.removeItem("be_silent_tried");
+        _showLoading(false);
+        _showSignInPage();
+      }
     }
   } catch (err) {
     console.error("[app] Init error:", err);
-    // Show the manual sign-in page only as a last-resort fallback
-    // (e.g. the auth server returned an unexpected error).
     _showLoading(false);
     _showSignInPage();
   }
@@ -235,21 +247,36 @@ function _bootSasMode(info, state) {
     disconnectBtn.id = "sasDisconnectBtn";
     disconnectBtn.className = "btn btn-secondary";
     disconnectBtn.title = "Disconnect SAS and return to sign-in";
-    disconnectBtn.textContent = "Disconnect";
+    disconnectBtn.innerHTML = "⏏ <span class='btn-label'>Disconnect</span>";
     sasBtnHeader.parentNode.insertBefore(disconnectBtn, sasBtnHeader.nextSibling);
   }
   disconnectBtn.classList.remove("hidden");
   disconnectBtn.onclick = () => {
     deactivateSasMode();
-    // Reset UI
-    _el("mainApp").classList.add("hidden");
-    _el("userInfo").classList.remove("hidden");
-    _el("signOutBtn").classList.remove("hidden");
-    _el("changeStorageBtn").classList.remove("hidden");
+    // Reset SAS-specific UI
     badge.className = "perm-badge hidden";
     sasBtnHeader.classList.add("hidden");
     disconnectBtn.classList.add("hidden");
-    _showSignInPage();
+
+    // If there is still an active OAuth session, return to the main app / picker
+    // rather than the sign-in page.
+    const activeUser = getUser();
+    if (activeUser) {
+      _el("userInfo").classList.remove("hidden");
+      _el("signOutBtn").classList.remove("hidden");
+      const pickerAllowed = CONFIG.app.allowStoragePicker !== false;
+      if (pickerAllowed) {
+        _showPickerPage(activeUser);
+      } else {
+        _bootApp(activeUser);
+      }
+    } else {
+      _el("mainApp").classList.add("hidden");
+      _el("userInfo").classList.remove("hidden");
+      _el("signOutBtn").classList.remove("hidden");
+      _el("changeStorageBtn").classList.remove("hidden");
+      _showSignInPage();
+    }
   };
 
   // Derive permissions from SAS sp= parameter
@@ -320,6 +347,14 @@ function _bootSasMode(info, state) {
 
   const startPrefix = info.blobPrefix;
 
+  // If the SAS has no list permission but has a specific blob path, skip
+  // listing entirely and show a download prompt straight away.
+  if (!canList && startPrefix && !startPrefix.endsWith("/")) {
+    _showLoading(false);
+    _showSasDownloadPanel(startPrefix);
+    return;
+  }
+
   // If the SAS is for a single blob (sr=b), navigate to its parent and auto-view/download
   if (state.signedResource === "b" && startPrefix && !startPrefix.endsWith("/")) {
     const parts = startPrefix.split("/");
@@ -344,6 +379,54 @@ function _bootSasMode(info, state) {
 // ── Storage picker ───────────────────────────────────────────
 
 /**
+ * Show a simple download/view card in the content area when a SAS token
+ * allows reading a specific blob but not listing the container.
+ */
+function _showSasDownloadPanel(blobPath) {
+  const fileName = blobPath.split("/").pop();
+  const icon     = getFileIcon(fileName);
+  const viewable = _isViewable(fileName);
+
+  _renderBreadcrumb("");
+  _el("emptyState").classList.add("hidden");
+  _el("fileContainer").innerHTML = "";
+  _hideError();
+  _el("networkErrorHelp").classList.add("hidden");
+
+  const card = document.createElement("div");
+  card.className = "sas-download-card";
+  card.innerHTML = `
+    <div class="sas-download-icon">${icon}</div>
+    <div class="sas-download-name">${_esc(fileName)}</div>
+    <p class="sas-download-hint">The SAS token grants read access to this file. What would you like to do?</p>
+    <div class="sas-download-actions">
+      ${viewable ? `<button class="btn btn-secondary sas-dl-view-btn">👁 View</button>` : ""}
+      <button class="btn btn-primary sas-dl-download-btn">⬇ Download</button>
+    </div>
+    <p class="sas-download-error hidden"></p>`;
+
+  _el("fileContainer").appendChild(card);
+
+  // Wire Download
+  card.querySelector(".sas-dl-download-btn").addEventListener("click", async () => {
+    try {
+      await downloadBlob(blobPath);
+    } catch (err) {
+      const errEl = card.querySelector(".sas-download-error");
+      errEl.textContent = err.message;
+      errEl.classList.remove("hidden");
+    }
+  });
+
+  // Wire View (if applicable)
+  if (viewable) {
+    card.querySelector(".sas-dl-view-btn").addEventListener("click", () => {
+      _showViewModal({ name: blobPath, displayName: fileName, size: 0 });
+    });
+  }
+}
+
+/**
  * Show the storage account / container picker page.
  * Discovers all accessible storage accounts via the ARM API and
  * renders them as collapsible cards. Clicking a container boots
@@ -353,13 +436,14 @@ async function _showPickerPage(account) {
   _el("signInPage").classList.add("hidden");
   _el("mainApp").classList.add("hidden");
   _el("pickerPage").classList.remove("hidden");
-  document.title = "Select Storage — " + (CONFIG.app.title || "Blob Storage Explorer");
+  document.title = "Select Storage — " + (CONFIG.app.title || "Azure Storage Explorer");
 
   // Populate user info in picker header
   const displayName = account.name || account.username;
   const upn          = account.username;
   _el("pickerUserName").textContent = upn ? `${displayName} (${upn})` : displayName;
   _el("pickerSignOutBtn").onclick = () => signOut();
+  _el("pickerOriginHint").textContent = window.location.origin;
 
   // Show the Back button only when the user is already inside a session
   // (i.e. they came here via the Change button, not on initial sign-in)
@@ -413,23 +497,40 @@ async function _showPickerPage(account) {
       for (const acct of accounts) accountEntries.push({ sub, acct });
     }
 
-    // Fetch containers for all accounts in parallel — used to filter out empties
-    const containerFetches = await Promise.allSettled(
-      accountEntries.map(({ acct }) =>
-        listContainers(acct.subscriptionId, acct.resourceGroup, acct.name)
-          .then(containers => ({ name: acct.name, containers }))
-      )
-    );
+    // Fetch containers AND CORS settings for all accounts in parallel
+    const [containerFetches, corsFetches] = await Promise.all([
+      Promise.allSettled(
+        accountEntries.map(({ acct }) =>
+          listContainers(acct.subscriptionId, acct.resourceGroup, acct.name)
+            .then(containers => ({ name: acct.name, containers }))
+        )
+      ),
+      Promise.allSettled(
+        accountEntries.map(({ acct }) =>
+          getBlobServiceCors(acct.subscriptionId, acct.resourceGroup, acct.name)
+            .then(allowed => ({ name: acct.name, allowed }))
+        )
+      ),
+    ]);
+
     const containerMap = new Map();
     containerFetches.forEach(r => {
       if (r.status === "fulfilled") containerMap.set(r.value.name, r.value.containers);
     });
 
-    // Group by subscription, skipping accounts that have zero containers
+    const corsMap = new Map();
+    corsFetches.forEach(r => {
+      if (r.status === "fulfilled") corsMap.set(r.value.name, r.value.allowed);
+    });
+
+    // Group by subscription, skipping accounts with zero containers or no CORS
     const subGroups = new Map();
     for (const { sub, acct } of accountEntries) {
       const containers = containerMap.get(acct.name);
       if (containers !== undefined && containers.length === 0) continue;
+      // Hide accounts where CORS is definitively not configured for this origin
+      const corsOk = corsMap.get(acct.name);
+      if (corsOk === false) continue;
       if (!subGroups.has(sub.subscriptionId)) subGroups.set(sub.subscriptionId, { sub, entries: [] });
       subGroups.get(sub.subscriptionId).entries.push({ acct, containers: containers ?? null });
     }
@@ -670,7 +771,27 @@ function _bootApp(account) {
   const pickerAllowed = CONFIG.app.allowStoragePicker !== false;
   _el("changeStorageBtn").classList.toggle("hidden", !pickerAllowed);
 
+  // Ensure OAuth controls are visible (may have been hidden by a prior SAS session)
+  _el("signOutBtn").classList.remove("hidden");
+  _el("userInfo").classList.remove("hidden");
+  document.getElementById("openSasHeaderBtn")?.classList.add("hidden");
+  document.getElementById("sasDisconnectBtn")?.classList.add("hidden");
+
+  // "Open SAS URL" button — add once, re-use on container switch
+  let openSasBtn = document.getElementById("openSasHeaderBtn");
+  if (!openSasBtn) {
+    openSasBtn = document.createElement("button");
+    openSasBtn.id = "openSasHeaderBtn";
+    openSasBtn.className = "btn btn-secondary open-sas-header-btn";
+    openSasBtn.title = "Open a SAS URL without signing out";
+    openSasBtn.innerHTML = "\uD83D\uDD11 <span class='btn-label'>Open SAS</span>";
+    _el("signOutBtn").parentNode.insertBefore(openSasBtn, _el("signOutBtn"));
+  }
+  openSasBtn.classList.remove("hidden");
+  openSasBtn.onclick = () => _showOpenSasModal();
+
   _el("signOutBtn").onclick     = () => signOut();
+  _el("helpBtn").onclick        = _showHelpModal;
   _el("refreshBtn").onclick     = () => _loadFiles(_currentPrefix);
   _el("reportBtn").onclick      = _exportReport;
   _el("downloadAllBtn").onclick = _downloadCurrentLevel;
@@ -715,7 +836,7 @@ function _bootApp(account) {
     if (_listingPromise) await _listingPromise.catch(() => {});
     if (_listLoadFailed) return;   // listing failed — hide badge, don't show misleading role
     const badge = _el("permBadge");
-    badge.textContent = hasPermission ? "\u270f\ufe0f Writer" : "\uD83D\uDCD6 Reader";
+    badge.textContent = hasPermission ? "\u270f\ufe0f Contributor" : "\uD83D\uDCD6 Reader";
     badge.classList.remove("hidden");
     if (!hasPermission) return;
     _canUpload = true;
@@ -769,6 +890,20 @@ async function _loadFiles(prefix) {
     _syncTreeToPrefix(prefix).catch(() => {});
   } catch (err) {
     console.error("[app] Load error:", err);
+
+    // In SAS mode a 403 on listing most likely means the token has no 'l'
+    // (list) permission but may still allow reading a specific blob.
+    // Show a download prompt instead of a raw error message.
+    if (isSasMode() && /403|Access denied/i.test(err.message)) {
+      const state = getSasState();
+      const blobPath = state.blobPrefix || prefix.replace(/\/$/, "");
+      if (blobPath) {
+        _showLoading(false);
+        _showSasDownloadPanel(blobPath);
+        return;
+      }
+    }
+
     _showError(`Failed to load files: ${err.message}`);
     _renderFiles([], []);
     _listLoadFailed = true;
@@ -1806,13 +1941,11 @@ function _showCopyMenu(btn, item, kind) {
   const menu = document.createElement("div");
   menu.className = "copy-menu";
 
-  [
-    { icon: "🗄️", label: "Blob URL",  sub: "Direct link to the file in Azure Storage",        url: blobUrl, isAppLink: false },
-    { icon: "🔗",  label: "App link", sub: "Link that opens this explorer at this location", url: appUrl,  isAppLink: true  },
-  ].forEach(({ icon, label, sub, url, isAppLink }) => {
-    const menuItem = document.createElement("button");
-    menuItem.type = "button";
-    menuItem.className = "copy-menu-item";
+  // ── Helper: build a menu item button ──
+  function _menuBtn(icon, label, sub, onClick) {
+    const mi = document.createElement("button");
+    mi.type = "button";
+    mi.className = "copy-menu-item";
     const iconSpan = document.createElement("span");
     iconSpan.className = "copy-menu-icon";
     iconSpan.textContent = icon;
@@ -1823,30 +1956,57 @@ function _showCopyMenu(btn, item, kind) {
     small.textContent = sub;
     textSpan.appendChild(strong);
     textSpan.appendChild(small);
-    menuItem.appendChild(iconSpan);
-    menuItem.appendChild(textSpan);
-    menuItem.addEventListener("click", (e) => {
+    mi.appendChild(iconSpan);
+    mi.appendChild(textSpan);
+    mi.addEventListener("click", (e) => {
       e.stopPropagation();
       menu.remove();
       _copyMenuOpen = null;
-      if (isAppLink && CONFIG.app.allowDownload) {
-        // Copy the URL, then offer a one-click download action in the toast
+      onClick();
+    });
+    return mi;
+  }
+
+  // ── Copy items ──
+  menu.appendChild(_menuBtn("🗄️", "Blob URL",
+    "Direct link to the file in Azure Storage",
+    () => _copyToClipboard(blobUrl)));
+
+  menu.appendChild(_menuBtn("🔗", "App link",
+    "Link that opens this explorer at this location",
+    () => {
+      if (CONFIG.app.allowDownload) {
         const dlFn = kind === "folder"
           ? () => _handleFolderDownload(item)
           : () => _handleDownload(item);
         const doToast = () => _showToast("📋 App link copied!", 8000, "⬇ Download", dlFn);
         if (navigator.clipboard && window.isSecureContext) {
-          navigator.clipboard.writeText(url).then(doToast).catch(() => { _fallbackCopy(url); doToast(); });
+          navigator.clipboard.writeText(appUrl).then(doToast).catch(() => { _fallbackCopy(appUrl); doToast(); });
         } else {
-          _fallbackCopy(url);
+          _fallbackCopy(appUrl);
           doToast();
         }
       } else {
-        _copyToClipboard(url);
+        _copyToClipboard(appUrl);
       }
-    });
-    menu.appendChild(menuItem);
-  });
+    }));
+
+  // ── Email items — only when signed in with OAuth ──
+  if (_canEmail()) {
+    const divider = document.createElement("div");
+    divider.className = "copy-menu-divider";
+    menu.appendChild(divider);
+
+    const itemName = item.displayName || item.name.split("/").filter(Boolean).pop() || item.name;
+
+    menu.appendChild(_menuBtn("📧", "Email blob URL",
+      "Send the direct Azure Storage link via email",
+      () => _showEmailComposeModal(itemName, blobUrl)));
+
+    menu.appendChild(_menuBtn("📧", "Email app link",
+      "Send the explorer link via email",
+      () => _showEmailComposeModal(itemName, appUrl)));
+  }
 
   document.body.appendChild(menu);
   _copyMenuOpen = menu;
@@ -1895,6 +2055,133 @@ function _fallbackCopy(text) {
   try { document.execCommand("copy"); ok = true; } catch {}
   document.body.removeChild(ta);
   return ok;
+}
+
+// ── Email compose modal ──────────────────────────────────────────
+
+/**
+ * Open the email compose modal pre-filled with a link.
+ * @param {string} itemName  Display name of the blob/folder
+ * @param {string} url       The URL to include in the email body
+ */
+function _showEmailComposeModal(itemName, url) {
+  const modal     = _el("emailModal");
+  const toInput   = _el("emailTo");
+  const subInput  = _el("emailSubject");
+  const bodyInput = _el("emailBody");
+  const errEl     = _el("emailError");
+  const sendingEl = _el("emailSending");
+  const closeBtn  = _el("emailModalClose");
+  const cancelBtn = _el("emailCancelBtn");
+  const sendBtn   = _el("emailSendBtn");
+
+  const user = getUser();
+  const senderName = user ? user.name : "Someone";
+
+  // Pre-fill
+  toInput.value   = "";
+  subInput.value  = `${senderName} shared "${itemName}" with you`;
+  bodyInput.value = `Hi,\n\n${senderName} shared a file with you from Azure Blob Storage:\n\n${url}\n\nRegards,\n${senderName}`;
+  errEl.textContent = "";
+  errEl.classList.add("hidden");
+  sendingEl.classList.add("hidden");
+  sendBtn.disabled = false;
+  modal.classList.remove("hidden");
+  toInput.focus();
+
+  const close = () => { modal.classList.add("hidden"); };
+
+  closeBtn.onclick  = close;
+  cancelBtn.onclick = close;
+  modal.addEventListener("click", (e) => { if (e.target === modal) close(); });
+
+  sendBtn.onclick = async () => {
+    errEl.classList.add("hidden");
+    const rawTo = toInput.value.trim();
+    if (!rawTo) {
+      errEl.textContent = "Please enter at least one recipient email address.";
+      errEl.classList.remove("hidden");
+      toInput.focus();
+      return;
+    }
+
+    // Parse recipients — split on ; , or space
+    const recipients = rawTo.split(/[;,\s]+/).map(e => e.trim()).filter(Boolean);
+    const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const invalid = recipients.filter(r => !emailRe.test(r));
+    if (invalid.length) {
+      errEl.textContent = `Invalid email address: ${invalid.join(", ")}`;
+      errEl.classList.remove("hidden");
+      return;
+    }
+
+    const subject = subInput.value.trim() || "(no subject)";
+    const body    = bodyInput.value;
+
+    sendBtn.disabled = true;
+    sendingEl.classList.remove("hidden");
+
+    try {
+      await _sendEmailViaGraph(recipients, subject, body);
+      close();
+      _showToast("📧 Email sent successfully!");
+    } catch (err) {
+      errEl.textContent = err.message || "Failed to send email.";
+      errEl.classList.remove("hidden");
+    } finally {
+      sendBtn.disabled = false;
+      sendingEl.classList.add("hidden");
+    }
+  };
+}
+
+/**
+ * Send an email using the Microsoft Graph /me/sendMail API.
+ * Requires an Exchange Online license and the Mail.Send scope.
+ * @param {string[]} recipients  Array of email addresses
+ * @param {string}   subject
+ * @param {string}   body        Plain text body
+ */
+async function _sendEmailViaGraph(recipients, subject, body) {
+  const token = await getGraphToken();
+
+  const payload = {
+    message: {
+      subject,
+      body: {
+        contentType: "Text",
+        content: body,
+      },
+      toRecipients: recipients.map(addr => ({
+        emailAddress: { address: addr },
+      })),
+    },
+    saveToSentItems: true,
+  };
+
+  const res = await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
+    method:  "POST",
+    headers: {
+      Authorization:  `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    let msg = `Failed to send email (${res.status})`;
+    try {
+      const data = await res.json();
+      if (data?.error?.message) {
+        msg = data.error.message;
+        // Friendly message for missing license
+        if (/MailboxNotEnabledForRESTAPI|MailboxNotFound/i.test(data.error.code || "")) {
+          msg = "Your account does not have an Exchange Online mailbox. Please ask your admin to assign a license.";
+        }
+      }
+    } catch {}
+    throw new Error(msg);
+  }
 }
 
 // ── Rename modal ─────────────────────────────────────────────────
@@ -2295,6 +2582,23 @@ function _guessMimeType(filename) {
     sql:  "text/plain",    log:  "text/plain",
   };
   return map[ext] || "application/octet-stream";
+}
+
+// ── Help modal ───────────────────────────────────────────────
+
+function _showHelpModal() {
+  const modal    = _el("helpModal");
+  const closeBtn = _el("helpModalClose");
+  const closeBtnFooter = _el("helpCloseBtn");
+
+  modal.classList.remove("hidden");
+
+  const close = () => modal.classList.add("hidden");
+  closeBtn.onclick = close;
+  closeBtnFooter.onclick = close;
+  modal.addEventListener("click", (e) => { if (e.target === modal) close(); }, { once: true });
+  const onKey = (e) => { if (e.key === "Escape") { close(); document.removeEventListener("keydown", onKey); } };
+  document.addEventListener("keydown", onKey);
 }
 
 // ── Location info ──────────────────────────────────────────
@@ -2801,7 +3105,15 @@ async function _loadTreeChildren(prefix, parentNode) {
     for (const folder of folders) {
       childrenEl.appendChild(_makeTreeNode(folder.displayName, folder.name));
     }
-  } catch {
+  } catch (err) {
+    // In SAS mode a listing 403 is expected when the token has no list permission —
+    // treat the node as a leaf rather than showing an error.
+    if (isSasMode() && /403|Access denied/i.test(err?.message || "")) {
+      const ch = parentNode.querySelector(":scope > .tree-node-row > .tree-chevron");
+      if (ch) ch.style.visibility = "hidden";
+      childrenEl.innerHTML = "";
+      return;
+    }
     childrenEl.innerHTML = `<div class="tree-loading tree-load-err">Failed to load</div>`;
   }
 }
@@ -2921,12 +3233,16 @@ function _showSasModal(item, isFolder) {
   const generateBtn = _el("sasGenerateBtn");
   const cancelBtn   = _el("sasCancelBtn");
   const copyBtn     = _el("sasCopyBtn");
+  const emailSasBtn = _el("sasEmailBtn");
   const closeBtn    = _el("sasModalClose");
 
   const close = () => modal.classList.add("hidden");
   closeBtn.onclick  = close;
   cancelBtn.onclick = close;
   modal.onclick = (e) => { if (e.target === modal) close(); };
+
+  // Show/hide email button based on capability
+  emailSasBtn.classList.toggle("hidden", !_canEmail());
 
   // ── Header & item info ──────────────────────────────────────
   titleEl.textContent = isFolder ? "Generate folder SAS" : "Generate file SAS";
@@ -3061,5 +3377,13 @@ function _showSasModal(item, isFolder) {
       resultEl.select();
       document.execCommand("copy");
     }
+  };
+
+  // ── Email SAS URL button ────────────────────────────────────
+  emailSasBtn.onclick = () => {
+    if (!resultEl.value) return;
+    const itemName = item.displayName || item.name.split("/").filter(Boolean).pop() || item.name;
+    close();
+    _showEmailComposeModal(itemName, resultEl.value);
   };
 }
