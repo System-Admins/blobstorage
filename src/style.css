@@ -1792,45 +1792,6 @@ body {
 
 /* ── New item modal ──────────────────────────────────────────── */
 
-.new-type-toggle {
-  display: flex;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-  margin-bottom: 16px;
-}
-
-.new-type-btn {
-  flex: 1;
-  background: none;
-  border: none;
-  padding: 8px 12px;
-  font-family: var(--font);
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-muted);
-  cursor: pointer;
-  border-right: 1px solid var(--border);
-  transition: background .12s, color .12s;
-}
-
-.new-type-btn:last-child { border-right: none; }
-
-.new-type-btn.active {
-  background: var(--azure-blue-light);
-  color: var(--azure-blue);
-}
-
-.new-type-btn:hover:not(.active) { background: var(--bg); color: var(--text); }
-
-.new-file-textarea {
-  height: 120px;
-  resize: vertical;
-  font-family: monospace;
-  font-size: 13px;
-  line-height: 1.5;
-}
-
 /* ── SAS generator modal ────────────────────────────────────── */
 
 .modal-wide { max-width: 640px; }
