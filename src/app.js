@@ -3702,7 +3702,7 @@ function _initTreeContextMenu() {
 
       // Navigate to the folder first so the actions target the right prefix
       if (_currentPrefix !== prefix) {
-        _loadFiles(prefix).then(() => _runTreeContextAction(action, prefix));
+        _loadFiles(prefix).then(() => _runTreeContextAction(action, prefix)).catch(() => {});
       } else {
         _runTreeContextAction(action, prefix);
       }
