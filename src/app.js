@@ -54,9 +54,9 @@ function _parseAppHash() {
   if (raw.startsWith("a=") || raw.includes("&c=")) {
     const params = new URLSearchParams(raw);
     return {
-      accountName:   decodeURIComponent(params.get("a") || ""),
-      containerName: decodeURIComponent(params.get("c") || ""),
-      path:          decodeURIComponent(params.get("p") || ""),
+      accountName:   params.get("a") || "",
+      containerName: params.get("c") || "",
+      path:          params.get("p") || "",
     };
   }
 
