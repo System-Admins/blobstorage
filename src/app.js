@@ -205,7 +205,7 @@ function _showAuditModal() {
       if (text === null || text.trim() === "") {
         _allEntries = [];
         csvBtn.disabled = true;
-        body.innerHTML = `<div class="audit-empty">No audit entries for ${val}.</div>`;
+        body.innerHTML = `<div class="audit-empty">No audit entries for ${_esc(val)}.</div>`;
         metaEl.textContent = "0 entries";
         return;
       }
