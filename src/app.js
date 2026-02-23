@@ -4118,8 +4118,10 @@ function _initTreeContextMenu() {
   if (!_treeContextMenuInitialized) {
     _treeContextMenuInitialized = true;
 
-    // Close on any outside click or Escape
-    document.addEventListener("click",   _hideTreeContextMenu);
+    // Close on outside click or Escape (ignore clicks inside the menu itself)
+    document.addEventListener("click", (e) => {
+      if (!menu.contains(e.target)) _hideTreeContextMenu();
+    });
     document.addEventListener("contextmenu", () => {
       // Defer so the tree-node handler can re-open if needed
       setTimeout(_hideTreeContextMenu, 0);
