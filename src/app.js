@@ -1029,7 +1029,7 @@ function _applyAndRender() {
     const term = (_el("searchInput")?.value || "").trim();
     const { folders: sortedFolders, files: sortedFiles } = _sortItems(
       _containerSearchResults.folders,
-      _containerSearchResults.files
+      _containerSearchResults.files.filter((f) => f.displayName !== ".keep" && !/^\.upload-probe-\d+$/.test(f.displayName))
     );
     const totalCount = sortedFolders.length + sortedFiles.length;
     banner.classList.remove("hidden");
@@ -1057,6 +1057,9 @@ function _applyAndRender() {
   const term = (_el("searchInput")?.value || "").trim().toLowerCase();
   let folders = _cachedFolders;
   let files   = _cachedFiles;
+
+  // Hide internal placeholder and probe blobs
+  files = files.filter((f) => f.displayName !== ".keep" && !/^\.upload-probe-\d+$/.test(f.displayName));
 
   if (term) {
     folders = folders.filter((f) => f.displayName.toLowerCase().includes(term));
@@ -2028,7 +2031,7 @@ async function _showProperties(file) {
 
 let _copyMenuOpen = null;
 
-function _showCopyMenu(btn, item, kind) {
+function _showCopyMenu(btn, item, kind, pos) {
   // Close any already-open menu
   if (_copyMenuOpen) { _copyMenuOpen.remove(); _copyMenuOpen = null; }
 
@@ -2110,13 +2113,27 @@ function _showCopyMenu(btn, item, kind) {
   document.body.appendChild(menu);
   _copyMenuOpen = menu;
 
-  // Use fixed positioning — no scroll offset math needed
-  const rect = btn.getBoundingClientRect();
-  const menuW = menu.offsetWidth || 260;
-  let left = rect.left;
-  if (left + menuW > window.innerWidth - 8) left = window.innerWidth - menuW - 8;
-  menu.style.top  = `${rect.bottom + 4}px`;
-  menu.style.left = `${Math.max(8, left)}px`;
+  // Position: use fixed coords if provided, otherwise anchor to the button
+  if (pos) {
+    const menuW = menu.offsetWidth || 260;
+    const menuH = menu.offsetHeight || 200;
+    let x = pos.x;
+    let y = pos.y;
+    if (x + menuW > window.innerWidth - 8)  x = window.innerWidth - menuW - 8;
+    if (y + menuH > window.innerHeight - 8) y = window.innerHeight - menuH - 8;
+    if (x < 8) x = 8;
+    if (y < 8) y = 8;
+    menu.style.top  = `${y}px`;
+    menu.style.left = `${x}px`;
+  } else {
+    // Use fixed positioning — no scroll offset math needed
+    const rect = btn.getBoundingClientRect();
+    const menuW = menu.offsetWidth || 260;
+    let left = rect.left;
+    if (left + menuW > window.innerWidth - 8) left = window.innerWidth - menuW - 8;
+    menu.style.top  = `${rect.bottom + 4}px`;
+    menu.style.left = `${Math.max(8, left)}px`;
+  }
 
   // Dismiss on outside click
   const dismiss = (e) => {
@@ -3462,6 +3479,9 @@ function _initFolderTree() {
   _el("folderTree").classList.toggle("tree-hidden", !_treeVisible);
   _el("treeToggleBtn").classList.toggle("active", _treeVisible);
   _updateTreeToggleArrow();
+
+  // Initialise right-click context menu on tree nodes
+  _initTreeContextMenu();
 }
 
 function _toggleFolderTree() {
@@ -3554,6 +3574,13 @@ function _makeTreeNode(displayName, prefix) {
     _loadFiles(prefix);
   });
 
+  // Right-click context menu on the tree row
+  row.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    _showTreeContextMenu(e, prefix);
+  });
+
   return node;
 }
 
@@ -3586,6 +3613,158 @@ async function _loadTreeChildren(prefix, parentNode) {
     }
     childrenEl.innerHTML = `<div class="tree-loading tree-load-err">Failed to load</div>`;
   }
+}
+
+// ── Tree context menu ────────────────────────────────────────
+
+function _showTreeContextMenu(event, prefix) {
+  const menu = _el("treeContextMenu");
+  if (!menu) return;
+
+  // Show / hide permission-gated items
+  menu.querySelector('[data-action="new"]').classList.toggle("hidden", !_canUpload);
+  menu.querySelector('[data-action="upload"]').classList.toggle("hidden", !_canUpload);
+  menu.querySelector('[data-action="copy"]').classList.toggle("hidden", !_canCopyItems());
+  menu.querySelector('[data-action="move"]').classList.toggle("hidden", !_canMoveItems());
+  menu.querySelector('[data-action="rename"]').classList.toggle("hidden", !_canRenameItems() || prefix === "");
+  menu.querySelector('[data-action="delete"]').classList.toggle("hidden", !_canDeleteItems() || prefix === "");
+  menu.querySelector('[data-action="sas"]').classList.toggle("hidden", !_canSas());
+
+  // Hide email sub-items when not available
+  const canEmail = _canEmail();
+  menu.querySelectorAll('.ctx-email-item').forEach(el => el.classList.toggle("hidden", !canEmail));
+
+  // Hide danger separator if delete is hidden
+  const dangerSep = menu.querySelector('.ctx-sep-danger');
+  if (dangerSep) dangerSep.classList.toggle("hidden", !_canDeleteItems() || prefix === "");
+
+  // Position the menu at the cursor, clamped to the viewport
+  menu.classList.remove("hidden");
+  const menuW = menu.offsetWidth;
+  const menuH = menu.offsetHeight;
+  let x = event.clientX;
+  let y = event.clientY;
+  if (x + menuW > window.innerWidth)  x = window.innerWidth  - menuW - 4;
+  if (y + menuH > window.innerHeight) y = window.innerHeight - menuH - 4;
+  if (x < 0) x = 4;
+  if (y < 0) y = 4;
+  menu.style.left = x + "px";
+  menu.style.top  = y + "px";
+
+  // Flip submenu left if it would overflow the right edge
+  const submenu = menu.querySelector('.ctx-submenu');
+  if (submenu) {
+    submenu.classList.remove('flip-left');
+    const menuRight = x + menu.offsetWidth;
+    if (menuRight + 180 > window.innerWidth) submenu.classList.add('flip-left');
+  }
+
+  // Store which prefix this menu targets
+  menu.dataset.prefix = prefix;
+}
+
+function _hideTreeContextMenu() {
+  const menu = _el("treeContextMenu");
+  if (menu) menu.classList.add("hidden");
+}
+
+function _initTreeContextMenu() {
+  const menu = _el("treeContextMenu");
+  if (!menu) return;
+
+  // Close on any outside click or Escape
+  document.addEventListener("click",   _hideTreeContextMenu);
+  document.addEventListener("contextmenu", () => {
+    // Defer so the tree-node handler can re-open if needed
+    setTimeout(_hideTreeContextMenu, 0);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") _hideTreeContextMenu();
+  });
+  window.addEventListener("blur", _hideTreeContextMenu);
+  window.addEventListener("scroll", _hideTreeContextMenu, true);
+
+  // Action dispatcher
+  menu.addEventListener("click", (e) => {
+    const item = e.target.closest(".tree-context-menu-item");
+    if (!item) return;
+    const action = item.dataset.action;
+    const prefix = menu.dataset.prefix || "";
+    _hideTreeContextMenu();
+
+    // Navigate to the folder first so the actions target the right prefix
+    if (_currentPrefix !== prefix) {
+      _loadFiles(prefix).then(() => _runTreeContextAction(action, prefix));
+    } else {
+      _runTreeContextAction(action, prefix);
+    }
+  });
+}
+
+function _treeFolderItem(prefix) {
+  // Build a minimal folder item object matching the shape expected by the action modals
+  const displayName = prefix ? prefix.replace(/\/$/, "").split("/").pop() : CONFIG.storage.containerName;
+  return { name: prefix, displayName };
+}
+
+function _runTreeContextAction(action, prefix) {
+  const item = _treeFolderItem(prefix);
+  switch (action) {
+    case "new":       _showNewModal();                        break;
+    case "upload":    _toggleUploadPanel();                   break;
+    case "download":  _downloadCurrentLevel();                break;
+    case "info":      _showInfoModal();                       break;
+    case "refresh":   _loadFiles(_currentPrefix);             break;
+    case "report":    _exportReport();                        break;
+    case "copy-blob-url": _treeCopyBlobUrl(item);              break;
+    case "copy-app-link": _treeCopyAppLink(item);              break;
+    case "email-blob-url": _treeEmailBlobUrl(item);            break;
+    case "email-app-link": _treeEmailAppLink(item);            break;
+    case "copy":      _showCopyModal(item, "folder");         break;
+    case "move":      _showMoveModal(item, "folder");         break;
+    case "rename":    _showRenameModal(item, "folder");       break;
+    case "delete":    _showDeleteModal(item, "folder");       break;
+    case "sas":       _showSasModal(item, true);              break;
+  }
+}
+
+function _treeBuildUrls(item) {
+  const { accountName, containerName } = CONFIG.storage;
+  const encoded = item.name.split("/").map(encodeURIComponent).join("/");
+  const blobUrl = `https://${accountName}.blob.core.windows.net/${containerName}/${encoded}`;
+  const appUrl  = `${window.location.origin}${window.location.pathname}#${encodeURIComponent(item.name)}`;
+  return { blobUrl, appUrl };
+}
+
+function _treeCopyBlobUrl(item) {
+  const { blobUrl } = _treeBuildUrls(item);
+  _copyToClipboard(blobUrl);
+}
+
+function _treeCopyAppLink(item) {
+  const { appUrl } = _treeBuildUrls(item);
+  if (CONFIG.app.allowDownload) {
+    const dlFn = () => _handleFolderDownload(item);
+    const doToast = () => _showToast("\uD83D\uDCCB App link copied!", 8000, "\u2B07 Download", dlFn);
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(appUrl).then(doToast).catch(() => { _fallbackCopy(appUrl); doToast(); });
+    } else {
+      _fallbackCopy(appUrl);
+      doToast();
+    }
+  } else {
+    _copyToClipboard(appUrl);
+  }
+}
+
+function _treeEmailBlobUrl(item) {
+  const { blobUrl } = _treeBuildUrls(item);
+  _showEmailComposeModal(item.displayName, blobUrl);
+}
+
+function _treeEmailAppLink(item) {
+  const { appUrl } = _treeBuildUrls(item);
+  _showEmailComposeModal(item.displayName, appUrl);
 }
 
 /**
@@ -3911,7 +4090,11 @@ function _updateThemeIcons() {
   const isDark = document.documentElement.getAttribute("data-theme") === "dark";
   // Icon shows the action: ☀️ = "switch to light", 🌙 = "switch to dark"
   const icon = isDark ? "\u2600\ufe0f" : "\uD83C\uDF19";
-  document.querySelectorAll(".theme-toggle").forEach((btn) => { btn.textContent = icon; });
+  document.querySelectorAll(".theme-toggle").forEach((btn) => {
+    // Update only the first text node so the <span class="btn-label"> child is preserved
+    const textNode = Array.from(btn.childNodes).find((n) => n.nodeType === Node.TEXT_NODE);
+    if (textNode) { textNode.textContent = icon + " "; } else { btn.prepend(icon + " "); }
+  });
 }
 
 // Apply theme immediately (before DOMContentLoaded so no flash-of-wrong-theme)

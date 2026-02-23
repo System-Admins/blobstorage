@@ -26,7 +26,7 @@
 
   <!-- ── Sign-in page ─────────────────────────────────────── -->
   <div id="signInPage" class="sign-in-page hidden">
-    <button id="signInThemeToggleBtn" class="theme-toggle sign-in-theme-toggle" title="Toggle dark / light theme" aria-label="Toggle dark or light theme">🌙</button>
+    <button id="signInThemeToggleBtn" class="btn btn-secondary theme-toggle sign-in-theme-toggle" title="Toggle dark / light theme" aria-label="Toggle dark or light theme">🌙</button>
     <div class="sign-in-card">
       <div class="app-logo">☁️</div>
       <h1>Blob Browser</h1>
@@ -49,7 +49,7 @@
         <h1 class="header-title">Blob Browser</h1>
       </div>
       <div class="picker-header-right">
-        <button id="pickerThemeToggleBtn" class="theme-toggle" title="Toggle dark / light theme" aria-label="Toggle dark or light theme">🌙</button>
+        <button id="pickerThemeToggleBtn" class="btn btn-secondary theme-toggle" title="Toggle dark / light theme" aria-label="Toggle dark or light theme">🌙 <span class="btn-label">Theme</span></button>
         <button id="pickerBackBtn" class="btn btn-secondary hidden" title="Return to current container">← Back to explorer</button>
         <button id="pickerSignOutBtn" class="btn btn-secondary" title="Sign out">🚪 <span class="btn-label">Sign out</span></button>
       </div>
@@ -101,7 +101,7 @@
         <span class="header-subtitle" id="storageInfo"></span>
       </div>
       <div class="header-right">
-        <button id="themeToggleBtn" class="theme-toggle" title="Toggle dark / light theme" aria-label="Toggle dark or light theme">🌙</button>
+        <button id="themeToggleBtn" class="btn btn-secondary theme-toggle" title="Toggle dark / light theme" aria-label="Toggle dark or light theme">🌙 <span class="btn-label">Theme</span></button>
         <button id="changeStorageBtn" class="btn btn-secondary" title="Switch storage account or container">🗄️ <span class="btn-label">Change</span></button>
         <button id="helpBtn" class="btn btn-secondary" title="Help">❓ <span class="btn-label">Help</span></button>
         <button id="signOutBtn" class="btn btn-secondary" title="Sign out">🚪 <span class="btn-label">Sign out</span></button>
@@ -237,6 +237,35 @@
         </main>
       </div><!-- /.app-content-col -->
     </div><!-- /.app-body -->
+
+    <!-- Tree view context menu -->
+    <div id="treeContextMenu" class="tree-context-menu hidden" role="menu">
+      <button class="tree-context-menu-item" data-action="new"      role="menuitem"><span class="ctx-icon">&#xff0b;</span> New</button>
+      <button class="tree-context-menu-item" data-action="upload"   role="menuitem"><span class="ctx-icon">⬆</span> Upload</button>
+      <div class="tree-context-menu-sep"></div>
+      <button class="tree-context-menu-item" data-action="download" role="menuitem"><span class="ctx-icon">⬇</span> Download</button>
+      <div class="tree-context-menu-item ctx-has-submenu" role="menuitem">
+        <span class="ctx-icon">🔗</span> Copy URL <span class="ctx-submenu-arrow">▶</span>
+        <div class="ctx-submenu" role="menu">
+          <button class="tree-context-menu-item" data-action="copy-blob-url" role="menuitem"><span class="ctx-icon">🗄️</span> Blob URL</button>
+          <button class="tree-context-menu-item" data-action="copy-app-link" role="menuitem"><span class="ctx-icon">🔗</span> App link</button>
+          <button class="tree-context-menu-item ctx-email-item" data-action="email-blob-url" role="menuitem"><span class="ctx-icon">📧</span> Email blob URL</button>
+          <button class="tree-context-menu-item ctx-email-item" data-action="email-app-link" role="menuitem"><span class="ctx-icon">📧</span> Email app link</button>
+        </div>
+      </div>
+      <button class="tree-context-menu-item" data-action="info"     role="menuitem"><span class="ctx-icon">ℹ️</span> Info</button>
+      <div class="tree-context-menu-sep"></div>
+      <button class="tree-context-menu-item" data-action="copy"     role="menuitem"><span class="ctx-icon">📋</span> Copy</button>
+      <button class="tree-context-menu-item" data-action="move"     role="menuitem"><span class="ctx-icon">📦</span> Move</button>
+      <button class="tree-context-menu-item" data-action="rename"   role="menuitem"><span class="ctx-icon">✏️</span> Rename</button>
+      <button class="tree-context-menu-item" data-action="sas"      role="menuitem"><span class="ctx-icon">🔑</span> SAS</button>
+      <div class="tree-context-menu-sep ctx-sep-danger"></div>
+      <button class="tree-context-menu-item ctx-danger" data-action="delete"   role="menuitem"><span class="ctx-icon">🗑️</span> Delete</button>
+      <div class="tree-context-menu-sep"></div>
+      <button class="tree-context-menu-item" data-action="refresh"  role="menuitem"><span class="ctx-icon">↻</span> Refresh</button>
+      <button class="tree-context-menu-item" data-action="report"   role="menuitem"><span class="ctx-icon">📊</span> Report</button>
+    </div>
+
     <footer class="app-footer">
       Developed by <a href="https://www.systemadmins.com" target="_blank" rel="noopener noreferrer">System Admins</a> &copy; <span id="footerYear"></span>
     </footer>
