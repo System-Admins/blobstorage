@@ -467,6 +467,80 @@ async function deleteBlob(blobName) {
   }
 }
 
+// ── Append Blob helpers (used by audit log) ──────────────────
+
+/**
+ * Create an Append Blob if it doesn't exist, then append a block of text.
+ * Uses "If-None-Match: *" for creation (no-op if blob exists) and
+ * ?comp=appendblock for appending.
+ *
+ * @param {string} blobPath  Full blob path inside the container
+ * @param {string} text      UTF-8 text to append
+ */
+async function appendToBlob(blobPath, text) {
+  const { accountName, containerName } = CONFIG.storage;
+  const blobUrl = `https://${accountName}.blob.core.windows.net`
+                + `/${containerName}/${_encodePath(blobPath)}`;
+
+  // 1. Ensure the append blob exists (idempotent create)
+  const authCreate = await _storageAuthHeaders();
+  const createRes = await fetch(_sasUrl(blobUrl), {
+    method: "PUT",
+    headers: {
+      ...authCreate,
+      "x-ms-blob-type":    "AppendBlob",
+      "Content-Length":     "0",
+      "Content-Type":      "application/x-ndjson",
+      "If-None-Match":     "*",          // only create if it doesn't exist
+    },
+  });
+  // 201 = created, 409 = already exists — both are fine
+  if (!createRes.ok && createRes.status !== 409) {
+    const text2 = await createRes.text();
+    throw new Error(`Append blob create failed (${createRes.status}): ${_parseStorageError(text2)}`);
+  }
+
+  // 2. Append the data block
+  const body = new TextEncoder().encode(text);
+  const authAppend = await _storageAuthHeaders();
+  const appendRes = await fetch(_sasUrl(`${blobUrl}?comp=appendblock`), {
+    method: "PUT",
+    headers: {
+      ...authAppend,
+      "Content-Length": String(body.byteLength),
+      "Content-Type":  "application/x-ndjson",
+    },
+    body: body,
+  });
+  if (!appendRes.ok) {
+    const text3 = await appendRes.text();
+    throw new Error(`Append block failed (${appendRes.status}): ${_parseStorageError(text3)}`);
+  }
+}
+
+/**
+ * Read a blob's content as text (UTF-8).
+ * Returns the text string, or null if the blob does not exist (404).
+ * @param {string} blobPath  Full blob path inside the container
+ * @returns {Promise<string|null>}
+ */
+async function readBlobText(blobPath) {
+  const { accountName, containerName } = CONFIG.storage;
+  const authHeaders = await _storageAuthHeaders();
+
+  const url = _sasUrl(`https://${accountName}.blob.core.windows.net`
+            + `/${containerName}/${_encodePath(blobPath)}`);
+
+  const response = await fetch(url, { headers: authHeaders });
+
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Read blob failed (${response.status}): ${_parseStorageError(text)}`);
+  }
+  return response.text();
+}
+
 /**
  * Delete all blobs under a virtual folder prefix (recursive).
  * Deletes files in parallel batches for performance on large folders.
@@ -1059,6 +1133,7 @@ async function listAllBlobs(nameFilter = "") {
     // Exclude virtual-directory placeholder blobs; apply name filter
     const filtered = blobs.filter((b) => {
       if (b.name.endsWith("/.keep")) return false;
+      if (b.name === ".audit" || b.name.startsWith(".audit/")) return false;
       return !lowerFilter || b.name.toLowerCase().includes(lowerFilter);
     });
 
@@ -1069,6 +1144,7 @@ async function listAllBlobs(nameFilter = "") {
 
   // Build matching folder objects
   const matchingFolders = [...folderSet]
+    .filter(f => !f.startsWith(".audit/"))
     .filter(f => !lowerFilter || f.toLowerCase().includes(lowerFilter))
     .map(name => ({
       name,

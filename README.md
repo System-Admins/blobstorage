@@ -2,6 +2,10 @@
 
 A zero-dependency, static single-page web application for browsing and managing files in **Azure Blob Storage**. Deploy it as an Azure Storage Account **Static Website** — no back-end, no build step, no `node_modules`. Authenticates via **OAuth 2.0 PKCE** against **Microsoft Entra ID** (or via a pasted **SAS URL**) using only native browser APIs.
 
+<p align="center">
+  <img src="docs/demo.gif" alt="Blob Browser demo" width="800" />
+</p>
+
 ---
 
 ## Features
@@ -17,9 +21,16 @@ A zero-dependency, static single-page web application for browsing and managing 
 - **Instant filter** — type to filter the current folder in real time
 - **Deep scan** — search across the entire container (prefix-based server-side listing)
 
+### Reports & audit
+- **Container report** — interactive modal with summary dashboard (file/folder counts, total size), filterable table with all 12 blob properties, and CSV download
+- **Audit log** — automatic action logging (upload, delete, rename, move, copy, edit, etc.) stored as daily Append Blobs in `.audit/YYYY/MM/DD.jsonl`
+- **Audit viewer** — built-in modal with date navigation, action and text filters, and CSV export
+- **Audit metadata** — records the uploader and last editor on every blob via `x-ms-meta-*` headers
+
 ### Sharing & SAS
 - **SAS generator** — create User Delegation SAS URLs with configurable expiry, IP restriction, and permissions
 - **Copy URL** — copy blob URL or application deep-link to clipboard, with email integration
+- **App links** — shareable deep-links that survive OAuth redirects
 - **Email links** — send file/folder links via Microsoft Graph (`Mail.Send`) from the signed-in user's mailbox
 
 ### Navigation & UX
@@ -32,7 +43,6 @@ A zero-dependency, static single-page web application for browsing and managing 
 
 ### Security & compliance
 - **Auto RBAC detection** — UI adapts to Reader vs. Contributor role automatically; no configuration needed
-- **Audit metadata** — records the uploader and last editor on every blob (`x-ms-meta-*`)
 - **Content Security Policy** — strict CSP meta tag; no inline scripts
 - **Zero dependencies** — no third-party JavaScript libraries; everything runs on native `fetch`, `crypto.subtle`, and standard DOM APIs
 
@@ -198,7 +208,10 @@ src/
 | **SAS generation** | Fetches a User Delegation Key via `POST`, then signs the SAS string in-browser with HMAC-SHA256 (`crypto.subtle`). Maximum expiry: 7 days. |
 | **Rename / Move** | Uses Copy Blob → Delete Source (no native rename in Azure). Folder renames are O(n) — one copy + delete per blob. |
 | **ZIP download** | Folders are streamed blob-by-blob and zipped client-side before download. |
+| **Audit logging** | Every mutating action (upload, delete, rename, move, copy, edit, create folder, SAS generation) is recorded as a JSONL entry in `.audit/YYYY/MM/DD.jsonl` using Append Blobs. The `.audit` folder is hidden from normal browsing. |
 | **Audit metadata** | Every upload and edit stamps `x-ms-meta-uploadedBy` / `x-ms-meta-lastEditedBy` on the blob. |
+| **Reports** | Container report recursively lists all blobs, displays an interactive summary (file/folder counts, total size), and offers CSV download with 12 columns (Type, Name, Full Path, Path Length, Blob URL, Size, Content Type, Last Modified, Created On, ETag, MD5, etc.). |
+| **Deep links** | Shareable URLs with hash fragment `#a=<account>&c=<container>&p=<path>`. The hash is saved to `sessionStorage` before OAuth redirects and restored afterwards. |
 | **Theme** | CSS custom properties with a `[data-theme="dark"]` selector on `<html>`. Follows OS preference by default; manual toggle persisted in `localStorage`. |
 
 ---

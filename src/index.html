@@ -103,6 +103,7 @@
       <div class="header-right">
         <button id="themeToggleBtn" class="btn btn-secondary theme-toggle" title="Toggle dark / light theme" aria-label="Toggle dark or light theme">🌙 <span class="btn-label">Theme</span></button>
         <button id="changeStorageBtn" class="btn btn-secondary" title="Switch storage account or container">🗄️ <span class="btn-label">Change</span></button>
+        <button id="auditBtn" class="btn btn-secondary hidden" title="View audit log">📋 <span class="btn-label">Audit</span></button>
         <button id="helpBtn" class="btn btn-secondary" title="Help">❓ <span class="btn-label">Help</span></button>
         <button id="signOutBtn" class="btn btn-secondary" title="Sign out">🚪 <span class="btn-label">Sign out</span></button>
       </div>
@@ -519,6 +520,53 @@
       </div>
     </div>
   </div>
+
+  <!-- ── Report viewer modal ────────────────────────────── -->
+  <div id="reportModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="reportModalTitle">
+    <div class="modal modal-wide report-modal">
+      <div class="modal-header">
+        <h2 class="modal-title" id="reportModalTitle">&#x1F4CA; Report</h2>
+        <div class="report-header-actions">
+          <button class="btn btn-icon btn-small" id="reportDownloadBtn" title="Download CSV" disabled>&#x2B07; Download CSV</button>
+          <button class="modal-close" id="reportModalClose" aria-label="Close">&times;</button>
+        </div>
+      </div>
+      <div class="modal-body report-modal-body" id="reportModalBody">
+        <div class="report-empty">Click <strong>Generate</strong> to scan the current folder.</div>
+      </div>
+      <div class="modal-footer">
+        <span id="reportMeta" class="view-file-meta"></span>
+        <button class="btn btn-secondary-neutral" id="reportCloseBtn">Close</button>
+        <button class="btn btn-primary-sm" id="reportGenerateBtn">&#x1F4CA; Generate</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Audit log viewer modal ────────────────────────── -->
+  <div id="auditModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="auditModalTitle">
+    <div class="modal modal-wide audit-modal">
+      <div class="modal-header">
+        <h2 class="modal-title" id="auditModalTitle">&#x1F4CB; Audit Log</h2>
+        <div class="audit-header-actions">
+          <input type="date" id="auditDate" class="audit-date-input" title="Select date" />
+          <button class="btn btn-icon btn-small" id="auditPrevDay" title="Previous day">&#x25C0;</button>
+          <button class="btn btn-icon btn-small" id="auditNextDay" title="Next day">&#x25B6;</button>
+          <button class="btn btn-icon btn-small" id="auditRefresh" title="Reload">&#x21BB;</button>
+          <button class="btn btn-small btn-secondary" id="auditExportCsv" title="Download as CSV" disabled>&#x2B07; CSV</button>
+          <button class="modal-close" id="auditModalClose" aria-label="Close">&times;</button>
+        </div>
+      </div>
+      <div class="modal-body audit-modal-body" id="auditModalBody">
+        <div class="audit-empty">Select a date to view audit entries.</div>
+      </div>
+      <div class="modal-footer">
+        <p class="audit-notice">&#x2139;&#xFE0F; This log only tracks actions performed through Blob Browser. Changes made via Azure Portal, Storage Explorer, CLI, or other tools are not recorded.</p>
+        <span id="auditMeta" class="view-file-meta"></span>
+        <button class="btn btn-secondary-neutral" id="auditCloseBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Help modal ─────────────────────────────────── -->
   <div id="helpModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="helpModalTitle">
     <div class="modal modal-wide">
