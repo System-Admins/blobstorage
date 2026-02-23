@@ -21,6 +21,49 @@ let _searchDebounceTimer    = null;
 // sessionStorage key for persisting the user's storage selection
 const _STORAGE_SELECTION_KEY = "be_storage_selection";
 
+// ── Deep-link hash helpers ─────────────────────────────────────
+
+/**
+ * Build a hash fragment that encodes account, container, and blob path.
+ * Format: #a=<account>&c=<container>&p=<path>
+ */
+function _buildAppHash(path) {
+  const a = encodeURIComponent(CONFIG.storage.accountName);
+  const c = encodeURIComponent(CONFIG.storage.containerName);
+  const p = path ? encodeURIComponent(path) : "";
+  return p ? `#a=${a}&c=${c}&p=${p}` : `#a=${a}&c=${c}`;
+}
+
+/**
+ * Build a full app URL (origin + path + hash) for the given blob path.
+ */
+function _buildAppUrl(path) {
+  return `${window.location.origin}${window.location.pathname}${_buildAppHash(path)}`;
+}
+
+/**
+ * Parse the current URL hash. Supports both the new structured format
+ * (#a=...&c=...&p=...) and the legacy format (#blobPath).
+ * Returns { accountName, containerName, path }.
+ */
+function _parseAppHash() {
+  const raw = window.location.hash.slice(1);
+  if (!raw) return { accountName: "", containerName: "", path: "" };
+
+  // New format: #a=<account>&c=<container>&p=<path>
+  if (raw.startsWith("a=") || raw.includes("&c=")) {
+    const params = new URLSearchParams(raw);
+    return {
+      accountName:   decodeURIComponent(params.get("a") || ""),
+      containerName: decodeURIComponent(params.get("c") || ""),
+      path:          decodeURIComponent(params.get("p") || ""),
+    };
+  }
+
+  // Legacy format: #<blobPath>
+  return { accountName: "", containerName: "", path: decodeURIComponent(raw) };
+}
+
 // Derived permission flags — depend on both RBAC probe and config switches
 function _canRenameItems() { return _canUpload && (CONFIG.app.allowRename !== false); }
 function _canDeleteItems() { return _canUpload && (CONFIG.app.allowDelete !== false); }
@@ -40,6 +83,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       sessionStorage.removeItem("be_silent_tried"); // clean up if a silent attempt just succeeded
       // Restore a previously chosen storage selection (survives page refresh)
       _restoreStorageSelection();
+      // If the URL contains a deep-link with account/container, apply it now
+      // so the picker is skipped and the correct account is opened directly.
+      const dl = _parseAppHash();
+      if (dl.accountName && dl.containerName) {
+        _setStorageSelection(dl.accountName, dl.containerName);
+      }
       // Show picker when no storage is configured, unless the picker is disabled
       const pickerEnabled = CONFIG.app.allowStoragePicker !== false;
       if (pickerEnabled && (!CONFIG.storage.accountName || !CONFIG.storage.containerName)) {
@@ -830,8 +879,8 @@ function _bootApp(account) {
   _listLoadFailed = false;
   _listingPromise = null;
   _selection.clear();
-  const hashPath = decodeURIComponent(window.location.hash.slice(1));
-  _listingPromise = _loadFiles(hashPath || "");
+  const deepLink = _parseAppHash();
+  _listingPromise = _loadFiles(deepLink.path || "");
 
   // Probe write access in parallel with the initial file listing.
   // The Upload button appears only if the signed-in user has the
@@ -874,7 +923,7 @@ function _goUp() {
 async function _loadFiles(prefix) {
   _listLoadFailed = false;
   _currentPrefix = prefix;
-  history.replaceState(null, "", prefix ? `#${encodeURIComponent(prefix)}` : window.location.pathname);
+  history.replaceState(null, "", prefix ? _buildAppHash(prefix) : window.location.pathname);
   _selection.clear();
   _updateSelectionBar();
   _el("upBtn").classList.toggle("hidden", !prefix);
@@ -2038,7 +2087,7 @@ function _showCopyMenu(btn, item, kind, pos) {
   const { accountName, containerName } = CONFIG.storage;
   const encoded = item.name.split("/").map(encodeURIComponent).join("/");
   const blobUrl = `https://${accountName}.blob.core.windows.net/${containerName}/${encoded}`;
-  const appUrl  = `${window.location.origin}${window.location.pathname}#${encodeURIComponent(item.name)}`;
+  const appUrl  = _buildAppUrl(item.name);
 
   const menu = document.createElement("div");
   menu.className = "copy-menu";
@@ -2874,6 +2923,7 @@ async function _bulkDelete() {
       _selection.clear();
       _updateSelectionBar();
       close();
+      _invalidateTreeChildren(_currentPrefix);
       _loadFiles(_currentPrefix);
       _showToast(`🗑️ ${count} item${count !== 1 ? "s" : ""} deleted`);
     } catch (err) {
@@ -2915,6 +2965,7 @@ function _showDeleteModal(item, type) {
         await deleteBlob(item.name);
       }
       close();
+      _invalidateTreeChildren(_currentPrefix);
       _loadFiles(_currentPrefix);
       _showToast(`🗑️ “${item.displayName}” deleted`);
     } catch (err) {
@@ -3741,7 +3792,7 @@ function _treeBuildUrls(item) {
   const { accountName, containerName } = CONFIG.storage;
   const encoded = item.name.split("/").map(encodeURIComponent).join("/");
   const blobUrl = `https://${accountName}.blob.core.windows.net/${containerName}/${encoded}`;
-  const appUrl  = `${window.location.origin}${window.location.pathname}#${encodeURIComponent(item.name)}`;
+  const appUrl  = _buildAppUrl(item.name);
   return { blobUrl, appUrl };
 }
 
