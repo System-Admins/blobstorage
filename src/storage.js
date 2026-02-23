@@ -494,8 +494,8 @@ async function appendToBlob(blobPath, text) {
       "If-None-Match":     "*",          // only create if it doesn't exist
     },
   });
-  // 201 = created, 409 = already exists — both are fine
-  if (!createRes.ok && createRes.status !== 409) {
+  // 201 = created, 409/412 = already exists (or precondition failed) — all are fine
+  if (!createRes.ok && createRes.status !== 409 && createRes.status !== 412) {
     const text2 = await createRes.text();
     throw new Error(`Append blob create failed (${createRes.status}): ${_parseStorageError(text2)}`);
   }
