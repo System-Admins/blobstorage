@@ -115,8 +115,6 @@ On each **target** storage account you want to browse (not the one hosting the s
 | Exposed headers | `*` |
 | Max age | `86400` |
 
-> Add a second rule with origin `http://localhost:3000` for local development.
-
 ### 5 — Enable Static Website hosting
 
 1. **Storage Account** → **Data management** → **Static website** → **Enabled**
