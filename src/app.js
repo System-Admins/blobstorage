@@ -4044,8 +4044,7 @@ function _showSasModal(item, isFolder) {
       copyBtn.textContent = "\u2705 Copied";
       setTimeout(() => { copyBtn.textContent = orig; }, 2000);
     } catch {
-      resultEl.select();
-      document.execCommand("copy");
+      _fallbackCopy(resultEl.value);
     }
   };
 

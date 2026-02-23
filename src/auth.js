@@ -79,12 +79,12 @@ async function initAuth() {
     }
 
     await _exchangeCode(code, codeVerifier);
-    return _getUser();
+    return getUser();
   }
 
   // ── Already have a valid access token ──
   if (_hasValidToken()) {
-    return _getUser();
+    return getUser();
   }
 
   // ── Try a silent refresh ──
@@ -92,7 +92,7 @@ async function initAuth() {
   if (rt) {
     try {
       await _doRefresh(rt);
-      return _getUser();
+      return getUser();
     } catch (err) {
       console.warn("[auth] Silent refresh failed:", err.message);
       _clearSession();
@@ -199,10 +199,6 @@ function getUser() {
   }
 }
 
-/** Return true if a valid (non-expired) access token is currently stored. */
-function isAuthenticated() {
-  return _hasValidToken();
-}
 
 // ── Microsoft Graph token ────────────────────────────────────
 
@@ -372,9 +368,6 @@ function _hasValidToken() {
   return !!token && Date.now() < expiry;
 }
 
-function _getUser() {
-  return getUser();
-}
 
 function _clearSession() {
   Object.values(_KEYS).forEach((k) => sessionStorage.removeItem(k));

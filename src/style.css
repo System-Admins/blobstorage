@@ -1701,12 +1701,12 @@ body {
   .picker-body      { padding: 0 10px 48px; margin-top: 12px; }
   .picker-search    { width: 100%; }
   .picker-title-row { flex-direction: column; align-items: flex-start; gap: 8px; }
-  .picker-account-card { border-radius: var(--radius); }
+
   .picker-account-header { padding: 10px 12px; }
   .picker-account-name { font-size: 14px; }
   .picker-container-item { padding: 8px 12px; padding-left: 28px; font-size: 13px; }
   .picker-cors-hint { font-size: 11px; padding: 10px 12px; }
-  .picker-account-badge { font-size: 10px; padding: 2px 6px; }
+
 }
 
 /* ── File viewer modal ────────────────────────────────────── */
@@ -1835,7 +1835,7 @@ body {
   white-space: pre;
   overflow-x: visible;
   flex: 1;
-  color: #1e293b;
+  color: var(--text);
   background: transparent;
 }
 
@@ -2463,7 +2463,7 @@ body {
   color: var(--error);
 }
 
-[data-theme="dark"] .view-image-wrapper {
+[data-theme="dark"] .view-image-container {
   background-color: var(--bg-checkerboard);
   background-image:
     linear-gradient(45deg, #2a2a3e 25%, transparent 25%),
