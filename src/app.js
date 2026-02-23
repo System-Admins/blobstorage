@@ -3668,37 +3668,46 @@ function _hideTreeContextMenu() {
   if (menu) menu.classList.add("hidden");
 }
 
+let _treeContextMenuInitialized = false;
+
 function _initTreeContextMenu() {
   const menu = _el("treeContextMenu");
   if (!menu) return;
 
-  // Close on any outside click or Escape
-  document.addEventListener("click",   _hideTreeContextMenu);
-  document.addEventListener("contextmenu", () => {
-    // Defer so the tree-node handler can re-open if needed
-    setTimeout(_hideTreeContextMenu, 0);
-  });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") _hideTreeContextMenu();
-  });
-  window.addEventListener("blur", _hideTreeContextMenu);
-  window.addEventListener("scroll", _hideTreeContextMenu, true);
+  // Register document/window listeners only once to avoid duplicate handlers
+  if (!_treeContextMenuInitialized) {
+    _treeContextMenuInitialized = true;
 
-  // Action dispatcher
-  menu.addEventListener("click", (e) => {
-    const item = e.target.closest(".tree-context-menu-item");
-    if (!item) return;
-    const action = item.dataset.action;
-    const prefix = menu.dataset.prefix || "";
-    _hideTreeContextMenu();
+    // Close on any outside click or Escape
+    document.addEventListener("click",   _hideTreeContextMenu);
+    document.addEventListener("contextmenu", () => {
+      // Defer so the tree-node handler can re-open if needed
+      setTimeout(_hideTreeContextMenu, 0);
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") _hideTreeContextMenu();
+    });
+    window.addEventListener("blur", _hideTreeContextMenu);
+    window.addEventListener("scroll", _hideTreeContextMenu, true);
 
-    // Navigate to the folder first so the actions target the right prefix
-    if (_currentPrefix !== prefix) {
-      _loadFiles(prefix).then(() => _runTreeContextAction(action, prefix));
-    } else {
-      _runTreeContextAction(action, prefix);
-    }
-  });
+    // Action dispatcher
+    menu.addEventListener("click", (e) => {
+      const item = e.target.closest(".tree-context-menu-item");
+      if (!item) return;
+      const action = item.dataset.action;
+      // Items without data-action (e.g. submenu triggers) are non-actions; leave menu open
+      if (!action) return;
+      const prefix = menu.dataset.prefix || "";
+      _hideTreeContextMenu();
+
+      // Navigate to the folder first so the actions target the right prefix
+      if (_currentPrefix !== prefix) {
+        _loadFiles(prefix).then(() => _runTreeContextAction(action, prefix));
+      } else {
+        _runTreeContextAction(action, prefix);
+      }
+    });
+  }
 }
 
 function _treeFolderItem(prefix) {
