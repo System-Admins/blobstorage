@@ -1165,7 +1165,7 @@ function _goUp() {
 async function _loadFiles(prefix) {
   _listLoadFailed = false;
   _currentPrefix = prefix;
-  history.replaceState(null, "", prefix ? _buildAppHash(prefix) : window.location.pathname);
+  history.replaceState(null, "", _buildAppHash(prefix || ""));
   _selection.clear();
   _updateSelectionBar();
   _el("upBtn").classList.toggle("hidden", !prefix);
