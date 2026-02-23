@@ -79,12 +79,12 @@ async function initAuth() {
     }
 
     await _exchangeCode(code, codeVerifier);
-    return _getUser();
+    return getUser();
   }
 
   // ── Already have a valid access token ──
   if (_hasValidToken()) {
-    return _getUser();
+    return getUser();
   }
 
   // ── Try a silent refresh ──
@@ -92,7 +92,7 @@ async function initAuth() {
   if (rt) {
     try {
       await _doRefresh(rt);
-      return _getUser();
+      return getUser();
     } catch (err) {
       console.warn("[auth] Silent refresh failed:", err.message);
       _clearSession();
@@ -116,6 +116,7 @@ async function signInSilent() {
   sessionStorage.setItem(_KEYS.CODE_VERIFIER, verifier);
   sessionStorage.setItem(_KEYS.STATE, state);
   sessionStorage.setItem("be_silent_attempt", "1");
+  _saveDeepLink();
 
   window.location.href = _base() + "/authorize?" + new URLSearchParams({
     client_id:             CONFIG.auth.clientId,
@@ -141,6 +142,7 @@ async function signIn() {
 
   sessionStorage.setItem(_KEYS.CODE_VERIFIER, verifier);
   sessionStorage.setItem(_KEYS.STATE, state);
+  _saveDeepLink();
 
   window.location.href = _base() + "/authorize?" + new URLSearchParams({
     client_id:             CONFIG.auth.clientId,
@@ -199,10 +201,6 @@ function getUser() {
   }
 }
 
-/** Return true if a valid (non-expired) access token is currently stored. */
-function isAuthenticated() {
-  return _hasValidToken();
-}
 
 // ── Microsoft Graph token ────────────────────────────────────
 
@@ -372,9 +370,6 @@ function _hasValidToken() {
   return !!token && Date.now() < expiry;
 }
 
-function _getUser() {
-  return getUser();
-}
 
 function _clearSession() {
   Object.values(_KEYS).forEach((k) => sessionStorage.removeItem(k));
@@ -387,5 +382,18 @@ function _clearSession() {
 
 /** Remove ?code=...&state=... from the browser URL without a page reload. */
 function _cleanUrl() {
-  window.history.replaceState({}, document.title, window.location.pathname);
+  // Restore any deep-link hash that was saved before the auth redirect.
+  // The hash is lost during the OAuth round-trip because the redirect_uri
+  // only receives ?code=...&state=... with no hash fragment.
+  const savedHash = sessionStorage.getItem("be_deep_link");
+  sessionStorage.removeItem("be_deep_link");
+  window.history.replaceState({}, document.title,
+    window.location.pathname + (savedHash || ""));
+}
+
+/** Save the current URL hash so it survives an OAuth redirect round-trip. */
+function _saveDeepLink() {
+  if (window.location.hash) {
+    sessionStorage.setItem("be_deep_link", window.location.hash);
+  }
 }

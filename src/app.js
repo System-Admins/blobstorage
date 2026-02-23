@@ -21,6 +21,49 @@ let _searchDebounceTimer    = null;
 // sessionStorage key for persisting the user's storage selection
 const _STORAGE_SELECTION_KEY = "be_storage_selection";
 
+// ── Deep-link hash helpers ─────────────────────────────────────
+
+/**
+ * Build a hash fragment that encodes account, container, and blob path.
+ * Format: #a=<account>&c=<container>&p=<path>
+ */
+function _buildAppHash(path) {
+  const a = encodeURIComponent(CONFIG.storage.accountName);
+  const c = encodeURIComponent(CONFIG.storage.containerName);
+  const p = path ? encodeURIComponent(path) : "";
+  return p ? `#a=${a}&c=${c}&p=${p}` : `#a=${a}&c=${c}`;
+}
+
+/**
+ * Build a full app URL (origin + path + hash) for the given blob path.
+ */
+function _buildAppUrl(path) {
+  return `${window.location.origin}${window.location.pathname}${_buildAppHash(path)}`;
+}
+
+/**
+ * Parse the current URL hash. Supports both the new structured format
+ * (#a=...&c=...&p=...) and the legacy format (#blobPath).
+ * Returns { accountName, containerName, path }.
+ */
+function _parseAppHash() {
+  const raw = window.location.hash.slice(1);
+  if (!raw) return { accountName: "", containerName: "", path: "" };
+
+  // New format: #a=<account>&c=<container>&p=<path>
+  if (raw.startsWith("a=") || raw.includes("&c=")) {
+    const params = new URLSearchParams(raw);
+    return {
+      accountName:   params.get("a") || "",
+      containerName: params.get("c") || "",
+      path:          params.get("p") || "",
+    };
+  }
+
+  // Legacy format: #<blobPath>
+  return { accountName: "", containerName: "", path: decodeURIComponent(raw) };
+}
+
 // Derived permission flags — depend on both RBAC probe and config switches
 function _canRenameItems() { return _canUpload && (CONFIG.app.allowRename !== false); }
 function _canDeleteItems() { return _canUpload && (CONFIG.app.allowDelete !== false); }
@@ -29,6 +72,244 @@ function _canCopyItems()   { return _canUpload; }
 function _canMoveItems()   { return _canUpload; }
 function _canEditItems()   { return _canUpload; }
 function _canEmail()       { return !isSasMode() && CONFIG.app.allowEmail !== false && !!getUser(); }
+
+// ── Audit log ────────────────────────────────────────────────
+// Writes JSONL entries to .audit/YYYY/MM/DD.jsonl (Append Blobs).
+// Fire-and-forget: failures are silently logged to the console.
+
+const _AUDIT_FOLDER = ".audit";
+
+/**
+ * Record an audit event.  Silently no-ops when the user lacks write access,
+ * when in SAS mode, or when an error occurs (audit must never block the UI).
+ *
+ * @param {string} action   One of: download, upload, edit, delete, rename, copy, move, sas, create
+ * @param {string} path     Blob or folder path the action targeted
+ * @param {object} [details]  Optional extra context (destination, SAS expiry, etc.)
+ */
+function _audit(action, path, details) {
+  // Guard: only audit when the user can write and is authenticated (not SAS mode)
+  if (!_canUpload || isSasMode()) return;
+  try {
+    const user = getUser();
+    const now  = new Date();
+    const yyyy = now.getUTCFullYear();
+    const mm   = String(now.getUTCMonth() + 1).padStart(2, "0");
+    const dd   = String(now.getUTCDate()).padStart(2, "0");
+    const logPath = `${_AUDIT_FOLDER}/${yyyy}/${mm}/${dd}.jsonl`;
+
+    const entry = {
+      ts:        now.toISOString(),
+      user:      user?.username || user?.name || "unknown",
+      userId:    user?.oid || "",
+      action,
+      path,
+      ...(details && Object.keys(details).length ? { details } : {}),
+    };
+
+    // Fire-and-forget — do not await
+    appendToBlob(logPath, JSON.stringify(entry) + "\n").catch((err) => {
+      console.warn("[audit] Failed to write audit log:", err.message);
+    });
+  } catch (err) {
+    console.warn("[audit] Error building audit entry:", err.message);
+  }
+}
+
+// ── Audit log viewer ─────────────────────────────────────────
+
+/**
+ * Open the audit-log viewer modal.  Defaults to today's date.
+ * Reads .audit/YYYY/MM/DD.jsonl and renders a filterable table.
+ */
+function _showAuditModal() {
+  const modal   = _el("auditModal");
+  const body    = _el("auditModalBody");
+  const metaEl  = _el("auditMeta");
+  const dateEl  = _el("auditDate");
+
+  // Default to today (local time)
+  const today = new Date();
+  dateEl.value = _auditDateStr(today);
+
+  modal.classList.remove("hidden");
+
+  // State
+  let _allEntries = [];
+  let _filterAction = "";
+  let _filterText   = "";
+
+  // Close
+  const close = () => { modal.classList.add("hidden"); body.innerHTML = ""; };
+  _el("auditModalClose").onclick = close;
+  _el("auditCloseBtn").onclick   = close;
+  modal.onclick = (e) => { if (e.target === modal) close(); };
+
+  // CSV export
+  const csvBtn = _el("auditExportCsv");
+  csvBtn.onclick = () => {
+    if (!_allEntries.length) return;
+    // Apply same filters as the table
+    let entries = _allEntries;
+    if (_filterAction) entries = entries.filter((e) => e.action === _filterAction);
+    if (_filterText) {
+      const lower = _filterText.toLowerCase();
+      entries = entries.filter((e) =>
+        (e.path || "").toLowerCase().includes(lower) ||
+        (e.user || "").toLowerCase().includes(lower) ||
+        JSON.stringify(e.details || {}).toLowerCase().includes(lower)
+      );
+    }
+    const csvEsc = (v) => { const s = String(v ?? ""); return s.includes(",") || s.includes('"') || s.includes("\n") ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    const rows = ["Time,Action,User,Path,Details"];
+    for (const e of entries) {
+      const time = e.ts ? new Date(e.ts).toLocaleString() : "";
+      const details = e.details ? Object.entries(e.details).map(([k, v]) => `${k}: ${v}`).join("; ") : "";
+      rows.push([time, e.action || "", e.user || "", e.path || "", details].map(csvEsc).join(","));
+    }
+    const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `audit-log-${dateEl.value}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  // Navigation
+  _el("auditPrevDay").onclick = () => {
+    const d = new Date(dateEl.value + "T00:00:00");
+    d.setDate(d.getDate() - 1);
+    dateEl.value = _auditDateStr(d);
+    loadDay();
+  };
+  _el("auditNextDay").onclick = () => {
+    const d = new Date(dateEl.value + "T00:00:00");
+    d.setDate(d.getDate() + 1);
+    dateEl.value = _auditDateStr(d);
+    loadDay();
+  };
+  dateEl.onchange = loadDay;
+  _el("auditRefresh").onclick = loadDay;
+
+  async function loadDay() {
+    const val = dateEl.value;           // "YYYY-MM-DD"
+    if (!val) return;
+    const [yyyy, mm, dd] = val.split("-");
+    const logPath = `${_AUDIT_FOLDER}/${yyyy}/${mm}/${dd}.jsonl`;
+
+    body.innerHTML = `<div class="audit-loading"><span class="audit-spinner"></span> Loading audit log\u2026</div>`;
+    metaEl.textContent = "";
+
+    try {
+      const text = await readBlobText(logPath);
+      if (text === null || text.trim() === "") {
+        _allEntries = [];
+        csvBtn.disabled = true;
+        body.innerHTML = `<div class="audit-empty">No audit entries for ${_esc(val)}.</div>`;
+        metaEl.textContent = "0 entries";
+        return;
+      }
+
+      _allEntries = text.trim().split("\n").map((line, i) => {
+        try { return JSON.parse(line); }
+        catch { return { ts: "", user: "?", action: "?", path: `(parse error line ${i + 1})`, _raw: line }; }
+      });
+
+      csvBtn.disabled = _allEntries.length === 0;
+      _filterAction = "";
+      _filterText   = "";
+      _renderAuditEntries();
+    } catch (err) {
+      body.innerHTML = `<div class="audit-empty">\u26A0\uFE0F Error loading audit log:<br><code>${_esc(err.message)}</code></div>`;
+      metaEl.textContent = "";
+    }
+  }
+
+  function _renderAuditEntries() {
+    let entries = _allEntries;
+
+    // Apply filters
+    if (_filterAction) {
+      entries = entries.filter((e) => e.action === _filterAction);
+    }
+    if (_filterText) {
+      const lower = _filterText.toLowerCase();
+      entries = entries.filter((e) =>
+        (e.path || "").toLowerCase().includes(lower) ||
+        (e.user || "").toLowerCase().includes(lower) ||
+        JSON.stringify(e.details || {}).toLowerCase().includes(lower)
+      );
+    }
+
+    // Collect unique actions for the filter dropdown
+    const actions = [...new Set(_allEntries.map((e) => e.action).filter(Boolean))].sort();
+
+    // Build filter bar + table
+    let html = `<div class="audit-filter-bar">
+      <select class="audit-filter-select" id="auditActionFilter" title="Filter by action">
+        <option value="">All actions</option>
+        ${actions.map((a) => `<option value="${_esc(a)}"${a === _filterAction ? " selected" : ""}>${_esc(a)}</option>`).join("")}
+      </select>
+      <input type="text" class="audit-filter-input" id="auditTextFilter" placeholder="Filter path, user, details\u2026" value="${_esc(_filterText)}" />
+    </div>`;
+
+    if (entries.length === 0) {
+      html += `<div class="audit-empty">No entries match the current filter.</div>`;
+    } else {
+      html += `<table class="audit-table"><thead><tr>
+        <th>Time</th>
+        <th>Action</th>
+        <th>User</th>
+        <th>Path</th>
+        <th>Details</th>
+      </tr></thead><tbody>`;
+
+      for (const e of entries) {
+        const time = e.ts ? new Date(e.ts).toLocaleString() : "\u2014";
+        const action = e.action || "\u2014";
+        const actionClass = `audit-action-${_esc(action)}`;
+        const user = _esc(e.user || "\u2014");
+        const path = _esc(e.path || "\u2014");
+        const details = e.details ? _esc(Object.entries(e.details).map(([k, v]) => `${k}: ${v}`).join(", ")) : "";
+
+        html += `<tr>
+          <td class="audit-col-time">${_esc(time)}</td>
+          <td class="audit-col-action"><span class="audit-action-badge ${actionClass}">${_esc(action)}</span></td>
+          <td class="audit-col-user" title="${user}">${user}</td>
+          <td class="audit-col-path" title="${path}">${path}</td>
+          <td class="audit-col-details" title="${details}">${details}</td>
+        </tr>`;
+      }
+      html += `</tbody></table>`;
+    }
+
+    body.innerHTML = html;
+    metaEl.textContent = `${entries.length} of ${_allEntries.length} entries`;
+
+    // Wire filter controls
+    const actionSel = _el("auditActionFilter");
+    const textInp   = _el("auditTextFilter");
+    if (actionSel) actionSel.onchange = () => { _filterAction = actionSel.value; _renderAuditEntries(); };
+    if (textInp) {
+      let _debounce;
+      textInp.oninput = () => {
+        clearTimeout(_debounce);
+        _debounce = setTimeout(() => { _filterText = textInp.value; _renderAuditEntries(); }, 250);
+      };
+    }
+  }
+
+  // Load today on open
+  loadDay();
+}
+
+/** Format a Date as "YYYY-MM-DD" for the date input. */
+function _auditDateStr(d) {
+  const yyyy = d.getFullYear();
+  const mm   = String(d.getMonth() + 1).padStart(2, "0");
+  const dd   = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
 
 // ── Entry point ──────────────────────────────────────────────
 
@@ -40,6 +321,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       sessionStorage.removeItem("be_silent_tried"); // clean up if a silent attempt just succeeded
       // Restore a previously chosen storage selection (survives page refresh)
       _restoreStorageSelection();
+      // If the URL contains a deep-link with account/container, apply it now
+      // so the picker is skipped and the correct account is opened directly.
+      const dl = _parseAppHash();
+      if (dl.accountName && dl.containerName) {
+        _setStorageSelection(dl.accountName, dl.containerName);
+      }
       // Show picker when no storage is configured, unless the picker is disabled
       const pickerEnabled = CONFIG.app.allowStoragePicker !== false;
       if (pickerEnabled && (!CONFIG.storage.accountName || !CONFIG.storage.containerName)) {
@@ -287,6 +574,7 @@ function _bootSasMode(info, state) {
   // Show/hide upload controls based on write permission
   _el("uploadBtn").classList.toggle("hidden", !canWrite);
   _el("newBtn").classList.toggle("hidden", !canWrite);
+  _el("auditBtn").classList.add("hidden"); // audit viewer not available in SAS mode
   _el("uploadPanel").classList.add("hidden");
   _el("uploadBtn").classList.remove("active");
   _uploadQueue   = [];
@@ -756,6 +1044,7 @@ function _bootApp(account) {
   _canUpload = false;
   _el("uploadBtn").classList.add("hidden");
   _el("newBtn").classList.add("hidden");
+  _el("auditBtn").classList.add("hidden");
   _el("uploadPanel").classList.add("hidden");
   _el("uploadBtn").classList.remove("active");
   _uploadQueue   = [];
@@ -830,8 +1119,8 @@ function _bootApp(account) {
   _listLoadFailed = false;
   _listingPromise = null;
   _selection.clear();
-  const hashPath = decodeURIComponent(window.location.hash.slice(1));
-  _listingPromise = _loadFiles(hashPath || "");
+  const deepLink = _parseAppHash();
+  _listingPromise = _loadFiles(deepLink.path || "");
 
   // Probe write access in parallel with the initial file listing.
   // The Upload button appears only if the signed-in user has the
@@ -849,6 +1138,8 @@ function _bootApp(account) {
     _canUpload = true;
     _el("uploadBtn").classList.remove("hidden");
     _el("newBtn").classList.remove("hidden");
+    _el("auditBtn").classList.remove("hidden");
+    _el("auditBtn").onclick       = _showAuditModal;
     _el("newBtn").onclick         = _showNewModal;
     _el("uploadBtn").onclick      = _toggleUploadPanel;
     _el("pickFilesBtn").onclick   = () => _el("fileInput").click();
@@ -874,7 +1165,7 @@ function _goUp() {
 async function _loadFiles(prefix) {
   _listLoadFailed = false;
   _currentPrefix = prefix;
-  history.replaceState(null, "", prefix ? `#${encodeURIComponent(prefix)}` : window.location.pathname);
+  history.replaceState(null, "", _buildAppHash(prefix || ""));
   _selection.clear();
   _updateSelectionBar();
   _el("upBtn").classList.toggle("hidden", !prefix);
@@ -1028,8 +1319,8 @@ function _applyAndRender() {
   if (_containerSearchResults !== null) {
     const term = (_el("searchInput")?.value || "").trim();
     const { folders: sortedFolders, files: sortedFiles } = _sortItems(
-      _containerSearchResults.folders,
-      _containerSearchResults.files
+      _containerSearchResults.folders.filter((f) => !f.name.startsWith(_AUDIT_FOLDER + "/")),
+      _containerSearchResults.files.filter((f) => f.displayName !== ".keep" && !/^\.upload-probe-\d+$/.test(f.displayName) && !f.name.startsWith(_AUDIT_FOLDER + "/"))
     );
     const totalCount = sortedFolders.length + sortedFiles.length;
     banner.classList.remove("hidden");
@@ -1057,6 +1348,10 @@ function _applyAndRender() {
   const term = (_el("searchInput")?.value || "").trim().toLowerCase();
   let folders = _cachedFolders;
   let files   = _cachedFiles;
+
+  // Hide internal placeholder, probe blobs, and audit folder
+  folders = folders.filter((f) => f.displayName !== _AUDIT_FOLDER);
+  files = files.filter((f) => f.displayName !== ".keep" && !/^\.upload-probe-\d+$/.test(f.displayName));
 
   if (term) {
     folders = folders.filter((f) => f.displayName.toLowerCase().includes(term));
@@ -1771,6 +2066,7 @@ async function _showEditModal(file) {
       if (oid) meta.last_edited_by_oid = oid;
 
       await uploadBlob(file.name, newFile, null, meta);
+      _audit("edit", file.name);
       close();
       _loadFiles(_currentPrefix);
       _showToast(`✅ "${file.displayName}" saved`);
@@ -1792,113 +2088,236 @@ function _setViewMode(mode) {
 
 // ── CSV Report ────────────────────────────────────────────
 
-async function _exportReport() {
-  _showToast("⏳ Scanning… building report", 60000);
-  _showLoading(true);
-  try {
-    const { accountName, containerName } = CONFIG.storage;
-    const rows = [];
+/**
+ * Open the report viewer modal. Shows a summary + table of all items
+ * under the current prefix, with a download-CSV button.
+ */
+function _exportReport() {
+  const modal   = _el("reportModal");
+  const body    = _el("reportModalBody");
+  const metaEl  = _el("reportMeta");
+  const dlBtn   = _el("reportDownloadBtn");
+  const genBtn  = _el("reportGenerateBtn");
 
-    // CSV header
-    rows.push([
-      "Type",
-      "Name",
-      "Full Path",
-      "Path Length",
-      "Blob URL",
-      "Size (MB)",
-      "Size (bytes)",
-      "Content Type",
-      "Last Modified",
-      "Created On",
-      "ETag",
-      "MD5",
-    ]);
+  modal.classList.remove("hidden");
+  body.innerHTML = `<div class="report-empty">Click <strong>Generate</strong> to scan <strong>${_esc(_currentPrefix || "/")}</strong>.</div>`;
+  metaEl.textContent = "";
+  dlBtn.disabled = true;
 
-    // Recursively collect every folder and file under the current prefix
-    async function collect(prefix) {
-      const { folders, files } = await listBlobsAtPrefix(prefix);
+  // State
+  let _allItems   = [];   // { type, displayName, name, size, contentType, lastModified, createdOn, etag, md5 }
+  let _csvBlob    = null;
+  let _csvName    = "";
+  let _filterType = "";
+  let _filterText = "";
 
-      for (const folder of folders) {
-        const encoded = folder.name.split("/").map(encodeURIComponent).join("/");
-        const blobUrl = `https://${accountName}.blob.core.windows.net/${containerName}/${encoded}`;
-        rows.push([
-          "folder",
-          folder.displayName,
-          folder.name,
-          String(folder.name.length),
-          blobUrl,
-          "",   // no size for folders
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-        ]);
-      }
+  // Close
+  const close = () => { modal.classList.add("hidden"); body.innerHTML = ""; _csvBlob = null; };
+  _el("reportModalClose").onclick = close;
+  _el("reportCloseBtn").onclick   = close;
+  modal.onclick = (e) => { if (e.target === modal) close(); };
 
-      for (const file of files) {
-        const encoded = file.name.split("/").map(encodeURIComponent).join("/");
-        const blobUrl = `https://${accountName}.blob.core.windows.net/${containerName}/${encoded}`;
-        const sizeMB  = file.size > 0
-          ? (file.size / (1024 * 1024)).toFixed(6)
-          : "0";
-        rows.push([
-          "file",
-          file.displayName,
-          file.name,
-          String(file.name.length),
-          blobUrl,
-          sizeMB,
-          String(file.size),
-          file.contentType || "",
-          file.lastModified || "",
-          file.createdOn   || "",
-          file.etag        || "",
-          file.md5         || "",
-        ]);
-      }
-
-      // Recurse into subfolders in parallel
-      await Promise.all(folders.map(folder => collect(folder.name)));
-    }
-
-    await collect(_currentPrefix);
-
-    // Serialize to CSV (RFC 4180 — fields with commas/quotes/newlines are quoted)
-    const csvContent = rows.map(row =>
-      row.map(cell => {
-        const s = String(cell ?? "");
-        return (s.includes(",") || s.includes('"') || s.includes("\n"))
-          ? `"${s.replace(/"/g, '""')}"`
-          : s;
-      }).join(",")
-    ).join("\r\n");
-
-    // Trigger download
-    const now      = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
-    const location = _currentPrefix
-      ? _currentPrefix.replace(/\/$/, "").split("/").pop()
-      : containerName;
-    const filename = `report_${location}_${now}.csv`;
-
-    const blob   = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
-    const url    = URL.createObjectURL(blob);
+  // Download CSV
+  dlBtn.onclick = () => {
+    if (!_csvBlob) return;
+    const url    = URL.createObjectURL(_csvBlob);
     const anchor = document.createElement("a");
     anchor.href     = url;
-    anchor.download = filename;
+    anchor.download = _csvName;
     document.body.appendChild(anchor);
     anchor.click();
     document.body.removeChild(anchor);
     URL.revokeObjectURL(url);
+    _showToast(`\u2705 Downloaded ${_csvName}`);
+  };
 
-    _showToast(`✅ ${filename} — ${rows.length - 1} items exported`);
-  } catch (err) {
-    console.error("[report]", err);
-    _showError(`Report failed: ${err.message}`);
-  } finally {
-    _showLoading(false);
+  // Generate
+  genBtn.onclick = generate;
+
+  async function generate() {
+    genBtn.disabled = true;
+    genBtn.textContent = "Scanning\u2026";
+    dlBtn.disabled = true;
+    body.innerHTML = `<div class="report-loading"><span class="report-spinner"></span> Scanning folders\u2026</div>`;
+    metaEl.textContent = "";
+    _allItems = [];
+    _csvBlob  = null;
+    _filterType = "";
+    _filterText = "";
+
+    try {
+      const { accountName, containerName } = CONFIG.storage;
+
+      async function collect(prefix) {
+        const { folders, files } = await listBlobsAtPrefix(prefix);
+        for (const folder of folders) {
+          _allItems.push({
+            type:        "folder",
+            displayName: folder.displayName,
+            name:        folder.name,
+            size:        0,
+            contentType: "",
+            lastModified: "",
+            createdOn:   "",
+            etag:        "",
+            md5:         "",
+          });
+        }
+        for (const file of files) {
+          _allItems.push({
+            type:        "file",
+            displayName: file.displayName,
+            name:        file.name,
+            size:        file.size || 0,
+            contentType: file.contentType || "",
+            lastModified: file.lastModified || "",
+            createdOn:   file.createdOn || "",
+            etag:        file.etag || "",
+            md5:         file.md5 || "",
+          });
+        }
+        await Promise.all(folders.map(f => collect(f.name)));
+      }
+
+      await collect(_currentPrefix);
+
+      // Build CSV blob for download
+      const csvHeader = [
+        "Type", "Name", "Full Path", "Path Length", "Blob URL",
+        "Size (MB)", "Size (bytes)", "Content Type",
+        "Last Modified", "Created On", "ETag", "MD5",
+      ];
+      const csvRows = [csvHeader];
+      for (const item of _allItems) {
+        const encoded = item.name.split("/").map(encodeURIComponent).join("/");
+        const blobUrl = `https://${accountName}.blob.core.windows.net/${containerName}/${encoded}`;
+        const sizeMB  = item.size > 0 ? (item.size / 1048576).toFixed(6) : "0";
+        csvRows.push([
+          item.type, item.displayName, item.name, String(item.name.length),
+          blobUrl, sizeMB, String(item.size), item.contentType,
+          item.lastModified, item.createdOn, item.etag, item.md5,
+        ]);
+      }
+      const csvText = csvRows.map(r =>
+        r.map(c => { const s = String(c ?? ""); return /[,"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }).join(",")
+      ).join("\r\n");
+
+      const now  = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+      const loc  = _currentPrefix ? _currentPrefix.replace(/\/$/, "").split("/").pop() : containerName;
+      _csvName = `report_${loc}_${now}.csv`;
+      _csvBlob = new Blob(["\uFEFF" + csvText], { type: "text/csv;charset=utf-8;" });
+      dlBtn.disabled = false;
+
+      _renderReportTable();
+    } catch (err) {
+      console.error("[report]", err);
+      body.innerHTML = `<div class="report-empty">\u26A0\uFE0F Report failed:<br><code>${_esc(err.message)}</code></div>`;
+      metaEl.textContent = "";
+    } finally {
+      genBtn.disabled = false;
+      genBtn.innerHTML = "\uD83D\uDCCA Generate";
+    }
+  }
+
+  function _renderReportTable() {
+    let items = _allItems;
+
+    // Apply filters
+    if (_filterType) items = items.filter(i => i.type === _filterType);
+    if (_filterText) {
+      const lower = _filterText.toLowerCase();
+      items = items.filter(i =>
+        i.displayName.toLowerCase().includes(lower) ||
+        i.name.toLowerCase().includes(lower) ||
+        i.contentType.toLowerCase().includes(lower)
+      );
+    }
+
+    // Compute summary stats
+    const totalFiles   = _allItems.filter(i => i.type === "file").length;
+    const totalFolders = _allItems.filter(i => i.type === "folder").length;
+    const totalSize    = _allItems.reduce((sum, i) => sum + (i.type === "file" ? i.size : 0), 0);
+
+    let html = `<div class="report-summary">
+      <div class="report-stat"><span class="report-stat-label">Files</span><span class="report-stat-value">${totalFiles.toLocaleString()}</span></div>
+      <div class="report-stat"><span class="report-stat-label">Folders</span><span class="report-stat-value">${totalFolders.toLocaleString()}</span></div>
+      <div class="report-stat"><span class="report-stat-label">Total size</span><span class="report-stat-value">${formatFileSize(totalSize)}</span></div>
+      <div class="report-stat"><span class="report-stat-label">Location</span><span class="report-stat-value">${_esc(_currentPrefix || "/")}</span></div>
+    </div>`;
+
+    // Filter bar
+    html += `<div class="report-filter-bar">
+      <select class="report-filter-select" id="reportTypeFilter" title="Filter by type">
+        <option value="">All types</option>
+        <option value="file"${_filterType === "file" ? " selected" : ""}>Files only</option>
+        <option value="folder"${_filterType === "folder" ? " selected" : ""}>Folders only</option>
+      </select>
+      <input type="text" class="report-filter-input" id="reportTextFilter" placeholder="Filter name, path, content type\u2026" value="${_esc(_filterText)}" />
+    </div>`;
+
+    if (items.length === 0) {
+      html += `<div class="report-empty">No items match the current filter.</div>`;
+    } else {
+      html += `<table class="report-table"><thead><tr>
+        <th>Type</th>
+        <th>Name</th>
+        <th>Full Path</th>
+        <th>Path Length</th>
+        <th>Blob URL</th>
+        <th>Size</th>
+        <th>Size (bytes)</th>
+        <th>Content Type</th>
+        <th>Last Modified</th>
+        <th>Created On</th>
+        <th>ETag</th>
+        <th>MD5</th>
+      </tr></thead><tbody>`;
+
+      const { accountName, containerName } = CONFIG.storage;
+      for (const item of items) {
+        const typeClass = item.type === "folder" ? "report-type-folder" : "report-type-file";
+        const icon      = item.type === "folder" ? "\uD83D\uDCC1" : "\uD83D\uDCC4";
+        const size      = item.type === "file" ? formatFileSize(item.size) : "\u2014";
+        const sizeBytes = item.type === "file" ? item.size.toLocaleString() : "\u2014";
+        const ct        = _esc(item.contentType || "\u2014");
+        const modified  = item.lastModified ? new Date(item.lastModified).toLocaleString() : "\u2014";
+        const created   = item.createdOn ? new Date(item.createdOn).toLocaleString() : "\u2014";
+        const encoded   = item.name.split("/").map(encodeURIComponent).join("/");
+        const blobUrl   = `https://${accountName}.blob.core.windows.net/${containerName}/${encoded}`;
+        const pathLen   = item.name.length;
+
+        html += `<tr>
+          <td class="report-col-type"><span class="report-col-type-label ${typeClass}">${icon} ${item.type}</span></td>
+          <td class="report-col-name" title="${_esc(item.displayName)}">${_esc(item.displayName)}</td>
+          <td class="report-col-path" title="${_esc(item.name)}">${_esc(item.name)}</td>
+          <td class="report-col-num">${pathLen}</td>
+          <td class="report-col-url" title="${_esc(blobUrl)}"><a href="${_esc(blobUrl)}" target="_blank" rel="noopener">${_esc(blobUrl)}</a></td>
+          <td class="report-col-size">${size}</td>
+          <td class="report-col-num">${sizeBytes}</td>
+          <td title="${ct}">${ct}</td>
+          <td style="white-space:nowrap">${_esc(modified)}</td>
+          <td style="white-space:nowrap">${_esc(created)}</td>
+          <td class="report-col-mono">${_esc(item.etag || "\u2014")}</td>
+          <td class="report-col-mono">${_esc(item.md5 || "\u2014")}</td>
+        </tr>`;
+      }
+      html += `</tbody></table>`;
+    }
+
+    body.innerHTML = html;
+    metaEl.textContent = `${items.length} of ${_allItems.length} items`;
+
+    // Wire filter controls
+    const typeSel = _el("reportTypeFilter");
+    const textInp = _el("reportTextFilter");
+    if (typeSel) typeSel.onchange = () => { _filterType = typeSel.value; _renderReportTable(); };
+    if (textInp) {
+      let _debounce;
+      textInp.oninput = () => {
+        clearTimeout(_debounce);
+        _debounce = setTimeout(() => { _filterText = textInp.value; _renderReportTable(); }, 250);
+      };
+    }
   }
 }
 
@@ -1908,6 +2327,7 @@ async function _handleDownload(file) {
   _showLoading(true);
   try {
     await downloadBlob(file.name);
+    _audit("download", file.name);
   } catch (err) {
     console.error("[app] Download error:", err);
     _showError(`Download failed: ${err.message}`);
@@ -1921,6 +2341,7 @@ async function _handleFolderDownload(folder) {
   _showToast(`⏳ Preparing "${folder.displayName}.zip"…`);
   try {
     await downloadFolderAsZip(folder.name, folder.displayName);
+    _audit("download", folder.name, { type: "folder" });
     _showToast(`✅ "${folder.displayName}.zip" downloaded`);
   } catch (err) {
     console.error("[app] Folder download error:", err);
@@ -1941,6 +2362,7 @@ async function _downloadCurrentLevel() {
       const pct = Math.round((done / total) * 100);
       _updateToastMsg(`⏳ Preparing ${done}/${total} files — ${pct}%`);
     });
+    _audit("download", _currentPrefix || "/", { type: "folder" });
     _showToast(`✅ "${displayName}.zip" downloaded`);
   } catch (err) {
     console.error("[app] Download error:", err);
@@ -2028,14 +2450,14 @@ async function _showProperties(file) {
 
 let _copyMenuOpen = null;
 
-function _showCopyMenu(btn, item, kind) {
+function _showCopyMenu(btn, item, kind, pos) {
   // Close any already-open menu
   if (_copyMenuOpen) { _copyMenuOpen.remove(); _copyMenuOpen = null; }
 
   const { accountName, containerName } = CONFIG.storage;
   const encoded = item.name.split("/").map(encodeURIComponent).join("/");
   const blobUrl = `https://${accountName}.blob.core.windows.net/${containerName}/${encoded}`;
-  const appUrl  = `${window.location.origin}${window.location.pathname}#${encodeURIComponent(item.name)}`;
+  const appUrl  = _buildAppUrl(item.name);
 
   const menu = document.createElement("div");
   menu.className = "copy-menu";
@@ -2110,13 +2532,27 @@ function _showCopyMenu(btn, item, kind) {
   document.body.appendChild(menu);
   _copyMenuOpen = menu;
 
-  // Use fixed positioning — no scroll offset math needed
-  const rect = btn.getBoundingClientRect();
-  const menuW = menu.offsetWidth || 260;
-  let left = rect.left;
-  if (left + menuW > window.innerWidth - 8) left = window.innerWidth - menuW - 8;
-  menu.style.top  = `${rect.bottom + 4}px`;
-  menu.style.left = `${Math.max(8, left)}px`;
+  // Position: use fixed coords if provided, otherwise anchor to the button
+  if (pos) {
+    const menuW = menu.offsetWidth || 260;
+    const menuH = menu.offsetHeight || 200;
+    let x = pos.x;
+    let y = pos.y;
+    if (x + menuW > window.innerWidth - 8)  x = window.innerWidth - menuW - 8;
+    if (y + menuH > window.innerHeight - 8) y = window.innerHeight - menuH - 8;
+    if (x < 8) x = 8;
+    if (y < 8) y = 8;
+    menu.style.top  = `${y}px`;
+    menu.style.left = `${x}px`;
+  } else {
+    // Use fixed positioning — no scroll offset math needed
+    const rect = btn.getBoundingClientRect();
+    const menuW = menu.offsetWidth || 260;
+    let left = rect.left;
+    if (left + menuW > window.innerWidth - 8) left = window.innerWidth - menuW - 8;
+    menu.style.top  = `${rect.bottom + 4}px`;
+    menu.style.left = `${Math.max(8, left)}px`;
+  }
 
   // Dismiss on outside click
   const dismiss = (e) => {
@@ -2367,6 +2803,7 @@ function _showRenameModal(item, type) {
       } else {
         await renameBlob(srcName, destName);
       }
+      _audit("rename", srcName, { newName: destName });
       close();
       _loadFiles(_currentPrefix);
       _showToast(`✓ Renamed to "${newName}"`);
@@ -2656,11 +3093,13 @@ function _showCopyMoveModal(item, type, mode) {
       let bulkCount = 0;
       const skipped = [];
       let conflictSkipped = 0;
+      let selSnap = [];
 
       if (type === "bulk") {
         bulkCount = _selection.size;
+        selSnap = [..._selection];             // snapshot before clear
         // Process each selected item, skipping same-location items
-        for (const name of _selection) {
+        for (const name of selSnap) {
           const isFolder = name.endsWith("/");
           const displayName = isFolder
             ? name.slice(0, -1).split("/").pop()
@@ -2694,6 +3133,15 @@ function _showCopyMoveModal(item, type, mode) {
           return;
         }
         await _processItem(item, type, normDest);
+      }
+
+      // Audit: log each processed item
+      if (type === "bulk") {
+        for (const name of selSnap) {
+          _audit(isMove ? "move" : "copy", name, { destination: normDest });
+        }
+      } else {
+        _audit(isMove ? "move" : "copy", item.name, { destination: normDest });
       }
 
       close();
@@ -2854,9 +3302,11 @@ async function _bulkDelete() {
           await deleteBlob(name);
         }
       }
+      for (const delName of _selection) _audit("delete", delName);
       _selection.clear();
       _updateSelectionBar();
       close();
+      _invalidateTreeChildren(_currentPrefix);
       _loadFiles(_currentPrefix);
       _showToast(`🗑️ ${count} item${count !== 1 ? "s" : ""} deleted`);
     } catch (err) {
@@ -2897,7 +3347,9 @@ function _showDeleteModal(item, type) {
       } else {
         await deleteBlob(item.name);
       }
+      _audit("delete", item.name, { type });
       close();
+      _invalidateTreeChildren(_currentPrefix);
       _loadFiles(_currentPrefix);
       _showToast(`🗑️ “${item.displayName}” deleted`);
     } catch (err) {
@@ -2979,6 +3431,7 @@ function _showNewModal() {
         if (u?.username) meta.uploaded_by_upn = u.username;
         if (u?.oid)      meta.uploaded_by_oid = u.oid;
         await uploadBlob(placeholderPath, file, null, meta);
+        _audit("create", _currentPrefix + name + "/", { type: "folder" });
         close();
         _invalidateTreeChildren(_currentPrefix);
         _loadFiles(_currentPrefix + name + "/");
@@ -3001,6 +3454,7 @@ function _showNewModal() {
         if (u2?.username) meta2.uploaded_by_upn = u2.username;
         if (u2?.oid)      meta2.uploaded_by_oid = u2.oid;
         await uploadBlob(blobPath, file, null, meta2);
+        _audit("create", blobPath, { type: "file" });
         close();
         _loadFiles(_currentPrefix);
         _showToast(`\uD83D\uDCC4 \u201C${name}\u201D created`);
@@ -3260,6 +3714,7 @@ async function _processQueue(overwrite) {
         }, metadata);
         item.status   = "done";
         item.progress = 100;
+        _audit("upload", item.blobPath, { size: item.file.size, overwrite: isOverwrite });
       }
     } catch (err) {
       item.status = "error";
@@ -3462,6 +3917,9 @@ function _initFolderTree() {
   _el("folderTree").classList.toggle("tree-hidden", !_treeVisible);
   _el("treeToggleBtn").classList.toggle("active", _treeVisible);
   _updateTreeToggleArrow();
+
+  // Initialise right-click context menu on tree nodes
+  _initTreeContextMenu();
 }
 
 function _toggleFolderTree() {
@@ -3554,6 +4012,13 @@ function _makeTreeNode(displayName, prefix) {
     _loadFiles(prefix);
   });
 
+  // Right-click context menu on the tree row
+  row.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    _showTreeContextMenu(e, prefix);
+  });
+
   return node;
 }
 
@@ -3562,7 +4027,9 @@ async function _loadTreeChildren(prefix, parentNode) {
   childrenEl.innerHTML = `<div class="tree-loading">Loading\u2026</div>`;
 
   try {
-    const { folders } = await listBlobsAtPrefix(prefix);
+    let { folders } = await listBlobsAtPrefix(prefix);
+    // Hide audit folder from the tree
+    if (prefix === "") folders = folders.filter((f) => f.displayName !== _AUDIT_FOLDER);
     childrenEl.innerHTML = "";
 
     if (folders.length === 0) {
@@ -3586,6 +4053,169 @@ async function _loadTreeChildren(prefix, parentNode) {
     }
     childrenEl.innerHTML = `<div class="tree-loading tree-load-err">Failed to load</div>`;
   }
+}
+
+// ── Tree context menu ────────────────────────────────────────
+
+function _showTreeContextMenu(event, prefix) {
+  const menu = _el("treeContextMenu");
+  if (!menu) return;
+
+  // Show / hide permission-gated items
+  menu.querySelector('[data-action="new"]').classList.toggle("hidden", !_canUpload);
+  menu.querySelector('[data-action="upload"]').classList.toggle("hidden", !_canUpload);
+  menu.querySelector('[data-action="copy"]').classList.toggle("hidden", !_canCopyItems());
+  menu.querySelector('[data-action="move"]').classList.toggle("hidden", !_canMoveItems());
+  menu.querySelector('[data-action="rename"]').classList.toggle("hidden", !_canRenameItems() || prefix === "");
+  menu.querySelector('[data-action="delete"]').classList.toggle("hidden", !_canDeleteItems() || prefix === "");
+  menu.querySelector('[data-action="sas"]').classList.toggle("hidden", !_canSas());
+
+  // Hide email sub-items when not available
+  const canEmail = _canEmail();
+  menu.querySelectorAll('.ctx-email-item').forEach(el => el.classList.toggle("hidden", !canEmail));
+
+  // Hide danger separator if delete is hidden
+  const dangerSep = menu.querySelector('.ctx-sep-danger');
+  if (dangerSep) dangerSep.classList.toggle("hidden", !_canDeleteItems() || prefix === "");
+
+  // Position the menu at the cursor, clamped to the viewport
+  menu.classList.remove("hidden");
+  const menuW = menu.offsetWidth;
+  const menuH = menu.offsetHeight;
+  let x = event.clientX;
+  let y = event.clientY;
+  if (x + menuW > window.innerWidth)  x = window.innerWidth  - menuW - 4;
+  if (y + menuH > window.innerHeight) y = window.innerHeight - menuH - 4;
+  if (x < 0) x = 4;
+  if (y < 0) y = 4;
+  menu.style.left = x + "px";
+  menu.style.top  = y + "px";
+
+  // Flip submenu left if it would overflow the right edge
+  const submenu = menu.querySelector('.ctx-submenu');
+  if (submenu) {
+    submenu.classList.remove('flip-left');
+    const menuRight = x + menu.offsetWidth;
+    if (menuRight + 180 > window.innerWidth) submenu.classList.add('flip-left');
+  }
+
+  // Store which prefix this menu targets
+  menu.dataset.prefix = prefix;
+}
+
+function _hideTreeContextMenu() {
+  const menu = _el("treeContextMenu");
+  if (menu) menu.classList.add("hidden");
+}
+
+let _treeContextMenuInitialized = false;
+
+function _initTreeContextMenu() {
+  const menu = _el("treeContextMenu");
+  if (!menu) return;
+
+  // Register document/window listeners only once to avoid duplicate handlers
+  if (!_treeContextMenuInitialized) {
+    _treeContextMenuInitialized = true;
+
+    // Close on outside click or Escape (ignore clicks inside the menu itself)
+    document.addEventListener("click", (e) => {
+      if (!menu.contains(e.target)) _hideTreeContextMenu();
+    });
+    document.addEventListener("contextmenu", () => {
+      // Defer so the tree-node handler can re-open if needed
+      setTimeout(_hideTreeContextMenu, 0);
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") _hideTreeContextMenu();
+    });
+    window.addEventListener("blur", _hideTreeContextMenu);
+    window.addEventListener("scroll", _hideTreeContextMenu, true);
+
+    // Action dispatcher
+    menu.addEventListener("click", (e) => {
+      const item = e.target.closest(".tree-context-menu-item");
+      if (!item) return;
+      const action = item.dataset.action;
+      // Items without data-action (e.g. submenu triggers) are non-actions; leave menu open
+      if (!action) return;
+      const prefix = menu.dataset.prefix || "";
+      _hideTreeContextMenu();
+
+      // Navigate to the folder first so the actions target the right prefix
+      if (_currentPrefix !== prefix) {
+        _loadFiles(prefix).then(() => _runTreeContextAction(action, prefix)).catch(() => {});
+      } else {
+        _runTreeContextAction(action, prefix);
+      }
+    });
+  }
+}
+
+function _treeFolderItem(prefix) {
+  // Build a minimal folder item object matching the shape expected by the action modals
+  const displayName = prefix ? prefix.replace(/\/$/, "").split("/").pop() : CONFIG.storage.containerName;
+  return { name: prefix, displayName };
+}
+
+function _runTreeContextAction(action, prefix) {
+  const item = _treeFolderItem(prefix);
+  switch (action) {
+    case "new":       _showNewModal();                        break;
+    case "upload":    _toggleUploadPanel();                   break;
+    case "download":  _downloadCurrentLevel();                break;
+    case "info":      _showInfoModal();                       break;
+    case "refresh":   _loadFiles(_currentPrefix);             break;
+    case "report":    _exportReport();                        break;
+    case "copy-blob-url": _treeCopyBlobUrl(item);              break;
+    case "copy-app-link": _treeCopyAppLink(item);              break;
+    case "email-blob-url": _treeEmailBlobUrl(item);            break;
+    case "email-app-link": _treeEmailAppLink(item);            break;
+    case "copy":      _showCopyModal(item, "folder");         break;
+    case "move":      _showMoveModal(item, "folder");         break;
+    case "rename":    _showRenameModal(item, "folder");       break;
+    case "delete":    _showDeleteModal(item, "folder");       break;
+    case "sas":       _showSasModal(item, true);              break;
+  }
+}
+
+function _treeBuildUrls(item) {
+  const { accountName, containerName } = CONFIG.storage;
+  const encoded = item.name.split("/").map(encodeURIComponent).join("/");
+  const blobUrl = `https://${accountName}.blob.core.windows.net/${containerName}/${encoded}`;
+  const appUrl  = _buildAppUrl(item.name);
+  return { blobUrl, appUrl };
+}
+
+function _treeCopyBlobUrl(item) {
+  const { blobUrl } = _treeBuildUrls(item);
+  _copyToClipboard(blobUrl);
+}
+
+function _treeCopyAppLink(item) {
+  const { appUrl } = _treeBuildUrls(item);
+  if (CONFIG.app.allowDownload) {
+    const dlFn = () => _handleFolderDownload(item);
+    const doToast = () => _showToast("\uD83D\uDCCB App link copied!", 8000, "\u2B07 Download", dlFn);
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(appUrl).then(doToast).catch(() => { _fallbackCopy(appUrl); doToast(); });
+    } else {
+      _fallbackCopy(appUrl);
+      doToast();
+    }
+  } else {
+    _copyToClipboard(appUrl);
+  }
+}
+
+function _treeEmailBlobUrl(item) {
+  const { blobUrl } = _treeBuildUrls(item);
+  _showEmailComposeModal(item.displayName, blobUrl);
+}
+
+function _treeEmailAppLink(item) {
+  const { appUrl } = _treeBuildUrls(item);
+  _showEmailComposeModal(item.displayName, appUrl);
 }
 
 /**
@@ -3844,6 +4474,11 @@ function _showSasModal(item, isFolder) {
         }
       );
       resultEl.value = sasUrl;
+      _audit("sas", isFolder ? (item.name || "/") : item.name, {
+        permissions: sp,
+        expiry: toUtcIso(expiryEl.value),
+        ip: ipEl.value.trim() || undefined,
+      });
       resultWrap.classList.remove("hidden");
       expiresNote.textContent = `Expires ${new Date(expiryEl.value).toLocaleString()}`;
       resultEl.select();
@@ -3865,8 +4500,7 @@ function _showSasModal(item, isFolder) {
       copyBtn.textContent = "\u2705 Copied";
       setTimeout(() => { copyBtn.textContent = orig; }, 2000);
     } catch {
-      resultEl.select();
-      document.execCommand("copy");
+      _fallbackCopy(resultEl.value);
     }
   };
 
@@ -3911,7 +4545,11 @@ function _updateThemeIcons() {
   const isDark = document.documentElement.getAttribute("data-theme") === "dark";
   // Icon shows the action: ☀️ = "switch to light", 🌙 = "switch to dark"
   const icon = isDark ? "\u2600\ufe0f" : "\uD83C\uDF19";
-  document.querySelectorAll(".theme-toggle").forEach((btn) => { btn.textContent = icon; });
+  document.querySelectorAll(".theme-toggle").forEach((btn) => {
+    // Update only the first text node so the <span class="btn-label"> child is preserved
+    const textNode = Array.from(btn.childNodes).find((n) => n.nodeType === Node.TEXT_NODE);
+    if (textNode) { textNode.textContent = icon + " "; } else { btn.prepend(icon + " "); }
+  });
 }
 
 // Apply theme immediately (before DOMContentLoaded so no flash-of-wrong-theme)

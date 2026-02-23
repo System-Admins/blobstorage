@@ -26,7 +26,7 @@
 
   <!-- ── Sign-in page ─────────────────────────────────────── -->
   <div id="signInPage" class="sign-in-page hidden">
-    <button id="signInThemeToggleBtn" class="theme-toggle sign-in-theme-toggle" title="Toggle dark / light theme" aria-label="Toggle dark or light theme">🌙</button>
+    <button id="signInThemeToggleBtn" class="btn btn-secondary theme-toggle sign-in-theme-toggle" title="Toggle dark / light theme" aria-label="Toggle dark or light theme">🌙</button>
     <div class="sign-in-card">
       <div class="app-logo">☁️</div>
       <h1>Blob Browser</h1>
@@ -49,7 +49,7 @@
         <h1 class="header-title">Blob Browser</h1>
       </div>
       <div class="picker-header-right">
-        <button id="pickerThemeToggleBtn" class="theme-toggle" title="Toggle dark / light theme" aria-label="Toggle dark or light theme">🌙</button>
+        <button id="pickerThemeToggleBtn" class="btn btn-secondary theme-toggle" title="Toggle dark / light theme" aria-label="Toggle dark or light theme">🌙 <span class="btn-label">Theme</span></button>
         <button id="pickerBackBtn" class="btn btn-secondary hidden" title="Return to current container">← Back to explorer</button>
         <button id="pickerSignOutBtn" class="btn btn-secondary" title="Sign out">🚪 <span class="btn-label">Sign out</span></button>
       </div>
@@ -101,8 +101,9 @@
         <span class="header-subtitle" id="storageInfo"></span>
       </div>
       <div class="header-right">
-        <button id="themeToggleBtn" class="theme-toggle" title="Toggle dark / light theme" aria-label="Toggle dark or light theme">🌙</button>
+        <button id="themeToggleBtn" class="btn btn-secondary theme-toggle" title="Toggle dark / light theme" aria-label="Toggle dark or light theme">🌙 <span class="btn-label">Theme</span></button>
         <button id="changeStorageBtn" class="btn btn-secondary" title="Switch storage account or container">🗄️ <span class="btn-label">Change</span></button>
+        <button id="auditBtn" class="btn btn-secondary hidden" title="View audit log">📋 <span class="btn-label">Audit</span></button>
         <button id="helpBtn" class="btn btn-secondary" title="Help">❓ <span class="btn-label">Help</span></button>
         <button id="signOutBtn" class="btn btn-secondary" title="Sign out">🚪 <span class="btn-label">Sign out</span></button>
       </div>
@@ -237,6 +238,35 @@
         </main>
       </div><!-- /.app-content-col -->
     </div><!-- /.app-body -->
+
+    <!-- Tree view context menu -->
+    <div id="treeContextMenu" class="tree-context-menu hidden">
+      <button class="tree-context-menu-item" data-action="new"><span class="ctx-icon">&#xff0b;</span> New</button>
+      <button class="tree-context-menu-item" data-action="upload"><span class="ctx-icon">⬆</span> Upload</button>
+      <div class="tree-context-menu-sep"></div>
+      <button class="tree-context-menu-item" data-action="download"><span class="ctx-icon">⬇</span> Download</button>
+      <div class="tree-context-menu-item ctx-has-submenu" role="menuitem" aria-haspopup="true" tabindex="0">
+        <span class="ctx-icon">🔗</span> Copy URL <span class="ctx-submenu-arrow">▶</span>
+        <div class="ctx-submenu" role="menu">
+          <button class="tree-context-menu-item" data-action="copy-blob-url"><span class="ctx-icon">🗄️</span> Blob URL</button>
+          <button class="tree-context-menu-item" data-action="copy-app-link"><span class="ctx-icon">🔗</span> App link</button>
+          <button class="tree-context-menu-item ctx-email-item" data-action="email-blob-url"><span class="ctx-icon">📧</span> Email blob URL</button>
+          <button class="tree-context-menu-item ctx-email-item" data-action="email-app-link"><span class="ctx-icon">📧</span> Email app link</button>
+        </div>
+      </div>
+      <button class="tree-context-menu-item" data-action="info"><span class="ctx-icon">ℹ️</span> Info</button>
+      <div class="tree-context-menu-sep"></div>
+      <button class="tree-context-menu-item" data-action="copy"><span class="ctx-icon">📋</span> Copy</button>
+      <button class="tree-context-menu-item" data-action="move"><span class="ctx-icon">📦</span> Move</button>
+      <button class="tree-context-menu-item" data-action="rename"><span class="ctx-icon">✏️</span> Rename</button>
+      <button class="tree-context-menu-item" data-action="sas"><span class="ctx-icon">🔑</span> SAS</button>
+      <div class="tree-context-menu-sep ctx-sep-danger"></div>
+      <button class="tree-context-menu-item ctx-danger" data-action="delete"><span class="ctx-icon">🗑️</span> Delete</button>
+      <div class="tree-context-menu-sep"></div>
+      <button class="tree-context-menu-item" data-action="refresh"><span class="ctx-icon">↻</span> Refresh</button>
+      <button class="tree-context-menu-item" data-action="report"><span class="ctx-icon">📊</span> Report</button>
+    </div>
+
     <footer class="app-footer">
       Developed by <a href="https://www.systemadmins.com" target="_blank" rel="noopener noreferrer">System Admins</a> &copy; <span id="footerYear"></span>
     </footer>
@@ -490,6 +520,53 @@
       </div>
     </div>
   </div>
+
+  <!-- ── Report viewer modal ────────────────────────────── -->
+  <div id="reportModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="reportModalTitle">
+    <div class="modal modal-wide report-modal">
+      <div class="modal-header">
+        <h2 class="modal-title" id="reportModalTitle">&#x1F4CA; Report</h2>
+        <div class="report-header-actions">
+          <button class="btn btn-icon btn-small" id="reportDownloadBtn" title="Download CSV" disabled>&#x2B07; Download CSV</button>
+          <button class="modal-close" id="reportModalClose" aria-label="Close">&times;</button>
+        </div>
+      </div>
+      <div class="modal-body report-modal-body" id="reportModalBody">
+        <div class="report-empty">Click <strong>Generate</strong> to scan the current folder.</div>
+      </div>
+      <div class="modal-footer">
+        <span id="reportMeta" class="view-file-meta"></span>
+        <button class="btn btn-secondary-neutral" id="reportCloseBtn">Close</button>
+        <button class="btn btn-primary-sm" id="reportGenerateBtn">&#x1F4CA; Generate</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Audit log viewer modal ────────────────────────── -->
+  <div id="auditModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="auditModalTitle">
+    <div class="modal modal-wide audit-modal">
+      <div class="modal-header">
+        <h2 class="modal-title" id="auditModalTitle">&#x1F4CB; Audit Log</h2>
+        <div class="audit-header-actions">
+          <input type="date" id="auditDate" class="audit-date-input" title="Select date" />
+          <button class="btn btn-icon btn-small" id="auditPrevDay" title="Previous day">&#x25C0;</button>
+          <button class="btn btn-icon btn-small" id="auditNextDay" title="Next day">&#x25B6;</button>
+          <button class="btn btn-icon btn-small" id="auditRefresh" title="Reload">&#x21BB;</button>
+          <button class="btn btn-small btn-secondary" id="auditExportCsv" title="Download as CSV" disabled>&#x2B07; CSV</button>
+          <button class="modal-close" id="auditModalClose" aria-label="Close">&times;</button>
+        </div>
+      </div>
+      <div class="modal-body audit-modal-body" id="auditModalBody">
+        <div class="audit-empty">Select a date to view audit entries.</div>
+      </div>
+      <div class="modal-footer">
+        <p class="audit-notice">&#x2139;&#xFE0F; This log only tracks actions performed through Blob Browser. Changes made via Azure Portal, Storage Explorer, CLI, or other tools are not recorded.</p>
+        <span id="auditMeta" class="view-file-meta"></span>
+        <button class="btn btn-secondary-neutral" id="auditCloseBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Help modal ─────────────────────────────────── -->
   <div id="helpModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="helpModalTitle">
     <div class="modal modal-wide">
